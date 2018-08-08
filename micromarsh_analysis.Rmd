@@ -15,7 +15,7 @@ library(tidyverse)
 design <- read_csv("data/design.csv",
    col_types = cols(
      sample_ID = col_character(), 
-     date = col_date(format = "%y-%b"),
+     date = col_date(format = "%m-%Y"),
      treatment = col_factor(levels = c("C", "CS", "F", "PU", "PR"), ordered = T),
      replicate = col_integer())) %>% 
   mutate(sample_ID = paste0("s", gsub("\\_", "", sample_ID))) %>% 
@@ -28,22 +28,23 @@ otus <- otus[-1,]
 head(otus)[,1:10]
 
 # make rownames of otutable match sample names
-rnames <- gsub("7_", "07_", rownames(otus)) # make dates two digits
-rnames <- gsub("3_", "03_", rnames)
+rnames <- gsub("7_1", "07_1", rownames(otus)) # make dates two digits
+rnames <- gsub("3_1", "03_1", rnames)
 rnames <- gsub("\\_", "", rnames) # remove underscores
 rnames <- gsub("cDNA", "", rnames) # remove cDNA
 rnames <- paste0("s",rnames)
 rownames(otus) <- rnames
 
 # reorder the otu table to match design
-otus <- as.data.frame(otus) %>% 
-  rownames_to_column(var = "sample_ID") %>% 
-  right_join(design) %>%
-  arrange(date) %>% 
-  select(-treatment, -replicate, -date) %>% 
-  column_to_rownames(var = "sample_ID")
+otus <- otus[match(design$sample_ID, rownames(otus)),]
 all.equal.character(rownames(otus), design$sample_ID) # check that order is correct
 ```
+
+# clean data
+```{r}
+
+```
+
 
 # Characterize alpha diversity
 ```{r}
