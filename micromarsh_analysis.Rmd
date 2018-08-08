@@ -1,0 +1,52 @@
+---
+title: "MicroMarsh"
+author: "Nathan Wisnoski"
+date: "8/8/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+```
+
+# Load the data
+```{r}
+# read in experimental design and change classes and sample names
+design <- read_csv("data/design.csv",
+   col_types = cols(
+     sample_ID = col_character(), 
+     date = col_date(format = "%y-%b"),
+     treatment = col_factor(levels = c("C", "CS", "F", "PU", "PR"), ordered = T),
+     replicate = col_integer())) %>% 
+  mutate(sample_ID = paste0("s", gsub("\\_", "", sample_ID))) %>% 
+  arrange(date)
+
+# create site by species matrix
+otus <- read_csv("data/cDNA iTag data.csv") %>% select(-taxonomy) %>% t()
+colnames(otus) <- paste0("otu", (otus[1, ] + 1))
+otus <- otus[-1,]
+head(otus)[,1:10]
+
+# make rownames of otutable match sample names
+rnames <- gsub("7_", "07_", rownames(otus)) # make dates two digits
+rnames <- gsub("3_", "03_", rnames)
+rnames <- gsub("\\_", "", rnames) # remove underscores
+rnames <- gsub("cDNA", "", rnames) # remove cDNA
+rnames <- paste0("s",rnames)
+rownames(otus) <- rnames
+
+# reorder the otu table to match design
+otus <- as.data.frame(otus) %>% 
+  rownames_to_column(var = "sample_ID") %>% 
+  right_join(design) %>%
+  arrange(date) %>% 
+  select(-treatment, -replicate, -date) %>% 
+  column_to_rownames(var = "sample_ID")
+all.equal.character(rownames(otus), design$sample_ID) # check that order is correct
+```
+
+# Characterize alpha diversity
+```{r}
+
+```
+
