@@ -1,0 +1,71 @@
+---
+title: "MicroMarsh"
+author: "Nathan Wisnoski"
+date: "8/8/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(vegan)
+```
+
+# Load the data
+```{r}
+# read in experimental design and change classes and sample names
+design <- read_csv("data/design.csv",
+   col_types = cols(
+     sample_ID = col_character(), 
+     date = col_date(format = "%m-%Y"),
+     treatment = col_factor(levels = c("C", "CS", "F", "PU", "PR"), ordered = T),
+     replicate = col_integer())) %>% 
+  mutate(sample_ID = paste0("s", gsub("\\_", "", sample_ID))) %>% 
+  arrange(date)
+
+# create site by species matrix
+otus <- read_csv("data/cDNA iTag data.csv") %>% select(-taxonomy) %>% t()
+colnames(otus) <- paste0("otu", (otus[1, ] + 1))
+otus <- otus[-1,]
+head(otus)[,1:10]
+
+# make rownames of otutable match sample names
+rnames <- gsub("7_1", "07_1", rownames(otus)) # make dates two digits
+rnames <- gsub("3_1", "03_1", rnames)
+rnames <- gsub("\\_", "", rnames) # remove underscores
+rnames <- gsub("cDNA", "", rnames) # remove cDNA
+rnames <- paste0("s",rnames)
+rownames(otus) <- rnames
+
+# reorder the otu table to match design
+otus <- otus[match(design$sample_ID, rownames(otus)),]
+all.equal.character(rownames(otus), design$sample_ID) # check that order is correct
+```
+
+# clean data
+```{r}
+# coverage per sample
+coverage <- rowSums(otus)
+
+# rarefy to lowest coverage
+otus.rare <- rrarefy(otus, min(coverage))
+
+# remove empty columns
+otus <- otus.rare[,-which(colSums(otus.rare) == 0)]
+```
+
+
+# Characterize alpha diversity
+```{r}
+otu.rich <- rowSums(decostand(otus, method = "pa"))
+rownames_to_column(data.frame(otu.rich, d1 = exp(diversity(otus, "shannon"))), "sample_ID") %>% 
+  right_join(design) %>% 
+  group_by(date, treatment) %>%
+  ggplot(aes(x = treatment, y = otu.rich, color = treatment, fill = treatment)) +
+  # geom_point(alpha = 0.5) +
+  geom_boxplot(position = position_dodge(), alpha = 0.5) +
+  theme_minimal() + 
+  facet_grid(~ date)
+
+
+```
+
