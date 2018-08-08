@@ -7,6 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 library(tidyverse)
+library(vegan)
 ```
 
 # Load the data
@@ -42,12 +43,29 @@ all.equal.character(rownames(otus), design$sample_ID) # check that order is corr
 
 # clean data
 ```{r}
+# coverage per sample
+coverage <- rowSums(otus)
 
+# rarefy to lowest coverage
+otus.rare <- rrarefy(otus, min(coverage))
+
+# remove empty columns
+otus <- otus.rare[,-which(colSums(otus.rare) == 0)]
 ```
 
 
 # Characterize alpha diversity
 ```{r}
+otu.rich <- rowSums(decostand(otus, method = "pa"))
+rownames_to_column(data.frame(otu.rich, d1 = exp(diversity(otus, "shannon"))), "sample_ID") %>% 
+  right_join(design) %>% 
+  group_by(date, treatment) %>%
+  ggplot(aes(x = treatment, y = otu.rich, color = treatment, fill = treatment)) +
+  # geom_point(alpha = 0.5) +
+  geom_boxplot(position = position_dodge(), alpha = 0.5) +
+  theme_minimal() + 
+  facet_grid(~ date)
+
 
 ```
 
