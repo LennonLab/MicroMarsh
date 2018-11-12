@@ -8,6 +8,7 @@ output: html_document
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(vegan)
+library(viridis)
 ```
 
 # Load the data
@@ -83,10 +84,15 @@ rownames_to_column(data.frame(otu.rich, d1 = exp(diversity(otus, "shannon"))), "
   right_join(design) %>% 
   group_by(date, treatment) %>%
   ggplot(aes(x = treatment, y = otu.rich, color = treatment, fill = treatment)) +
-  # geom_point(alpha = 0.5) +
   geom_boxplot(alpha = 0.5) +
+  geom_point() + 
   theme_minimal() + 
-  facet_grid(~ date)
+  facet_grid(~ date) + 
+  scale_color_viridis(begin = .2, end = .8, discrete = T) +
+  scale_fill_viridis(begin = .2, end = .8, discrete = T) +
+  labs(x = "Treatment", y = "Alpha diversity (species equivalents, D = 1)") +
+  ggsave("figures/alpha.png", width = 7, height = 4, units = "in", dpi = 300)
+  
 ```
 
 
@@ -102,11 +108,20 @@ as.data.frame(scores(otus.pcoa)) %>%
   rownames_to_column("sample_ID") %>% 
   left_join(design) %>% 
   ggplot(aes(x = Dim1, y = Dim2, color = treatment, shape = factor(date))) + 
-  geom_point(size = 3, alpha = 0.75) + 
+  geom_point(size = 5, alpha = 0.5) + 
   coord_fixed() + 
   theme_minimal() +
+  scale_color_viridis(begin = .2, end = .8, discrete = T) +
   labs(x = paste0("PCoA 1 (", explained[1],"%)"),
        y = paste0("PCoA 2 (", explained[2],"%)")) + 
   ggsave("figures/ordination.png", width = 8, height = 6, units = "in", dpi = 300)
+
+design
+perma <- adonis(otus ~ treatment * as.factor(date), method = "euclidean", data = design)
+perma
 ```
 
+```{r}
+dist.full <- vegdist(otus.full, method = "euclidean")
+design.full
+```
