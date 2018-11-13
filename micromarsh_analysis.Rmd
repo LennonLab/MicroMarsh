@@ -1,18 +1,43 @@
 ---
-title: "MicroMarsh"
+title: "Bacterial community responses to salinization"
 author: "Nathan Wisnoski"
-date: "8/8/2018"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
 output: html_document
 ---
 
+# Introduction
+As a result of changing climate, coastal freshwater ecosystems are increasingly vulnerable to saltwater intrusion due to rising sea levels, and organisms that live in these areas may be experiencing rapid environmental change. However, it is unclear how the duration of salinization disturbance relates to the stability of ecological communities. In some areas, communities may be exposed to increased salinity for short durations at high intensities (i.e., a pulse disturbance), while in other areas, exposure to high salinity may persist indefinitely (i.e., a press disturbance). 
+
+Under each type of disturbance regime, community stability can occur in several ways. First, some communities may undergo large changes in community structure (low resistance), while others may not change at all (high resistance). Second, communities may recover from perturbations quickly (high resilience), while others may take a long time to recover fully or may never reach their previous state (low resilience). In communities with low resistance and low resilience, there is the potential for the changing environmental conditions to create a tipping point, whereby shifts in community compositions are irrevocably altered, and so the community exists in a new state that may limit its ability to contend with future environmental uncertainty. 
+
+Some organisms may possess traits that buffer against these rapid changes in the environment, increasing the stability of communities in response to disturbance and maintaining adaptive capacity to respond to uncertain future scenarios. One of these traits is metabolic dormancy, a reversible state of reduced metabolic activity that can buffer organisms against suboptimal environmental conditions and can maintain taxonomic, genetic, and functional diversity in a dormant seed bank. 
+
+Among species that inhabit coastal ecosystems at risk for rapid change, bacterial communities are an ideal system in which to investigate stability in response to salinization disturbances. Here, we investigate how bacterial communities in tidal marshes respond to saltwater disturbances, and whether dormancy can buffer communities against rapidly changing environments.
+
+
+# Methods
+To determine how different disturbance regimes affect bacterial community stability,  field experiments were conducted at the Georgia Coastal Ecosystems LTER site. The following three experimental treatments were established in the field:  
+1. freshwater addition  
+2. pulse saltwater disturbance  
+3. press saltwater disturbance  
+in comparison to a control where plastic siding was added without water additions. 
+
+
+## Setup
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(vegan)
 library(viridis)
+library(lubridate)
 ```
 
-# Load the data
-```{r}
+### Load and clean the data
+A few things we'll need to do before moving forward with this:   
+1. We need to take the raw sequence data from the DNA and cDNA libraries and analyze them together to create OTUs that are shared between both the DNA and cDNA libraries.  
+2. It may also be interesting to take a look at the USV (unique sequence variant) approach, where we don't bin into OTUs, but rather look at sub-OTU-level variation in community structure.  
+
+
+```{r, include=FALSE}
 # read in experimental design and change classes and sample names
 design <- read_csv("data/design.csv",
    col_types = cols(
@@ -23,105 +48,156 @@ design <- read_csv("data/design.csv",
   mutate(sample_ID = paste0("s", gsub("\\_", "", sample_ID))) %>% 
   arrange(date)
 
-# create site by species matrix
-otus <- read_csv("data/cDNA iTag data.csv") %>% select(-taxonomy) %>% t()
-colnames(otus) <- paste0("otu", (otus[1, ] + 1))
-otus <- otus[-1,]
-head(otus)[,1:10]
+# # need to establish joint otus, they don't align between dna and rna data yet
+# dna <- read_csv("data/DNA_otus.csv")
+# rna <- read_csv("data/cDNA_otus.csv")
+
+# create site by species matrices
+dna <- read_csv("data/DNA_otus.csv") %>% select(-taxonomy) %>% t()
+colnames(dna) <- paste0("otu", (dna[1, ] + 1))
+dna <- dna[-1,]
+head(dna)[,1:10]
+
+rna <- read_csv("data/cDNA_otus.csv") %>% select(-taxonomy) %>% t()
+colnames(rna) <- paste0("otu", (rna[1, ] + 1))
+rna <- rna[-1,]
+head(rna)[,1:10]
 
 # make rownames of otutable match sample names
-rnames <- gsub("7_1", "07_1", rownames(otus)) # make dates two digits
+rnames <- gsub("7_1", "07_1", rownames(dna)) # make dates two digits
+rnames <- gsub("3_1", "03_1", rnames)
+rnames <- gsub("\\_", "", rnames) # remove underscores
+rnames <- paste0("s",rnames)
+rownames(dna) <- rnames
+
+rnames <- gsub("7_1", "07_1", rownames(rna)) # make dates two digits
 rnames <- gsub("3_1", "03_1", rnames)
 rnames <- gsub("\\_", "", rnames) # remove underscores
 rnames <- gsub("cDNA", "", rnames) # remove cDNA
 rnames <- paste0("s",rnames)
-rownames(otus) <- rnames
+rownames(rna) <- rnames
+
+# coverage per sample and rarefy to lowest coverage
+rna.coverage <- rowSums(rna)
+dna.coverage <- rowSums(dna)
+rna <- rna[which(rna.coverage > 20000),]
+dna <- dna[which(dna.coverage > 20000),]
+rna.coverage <- rowSums(rna)
+dna.coverage <- rowSums(dna)
+rna <- rrarefy(rna,  min(rna.coverage))
+dna <- rrarefy(dna,  min(dna.coverage))
+
+# update design object to reflect paired rna and dna samples
+design <- inner_join(data_frame(sample_ID = rownames(dna)), 
+           data_frame(sample_ID = rownames(rna))) %>% 
+  inner_join(design) %>% filter(treatment != "C")
 
 # reorder the otu table to match design
-otus <- otus[match(design$sample_ID, rownames(otus)),]
-all.equal.character(rownames(otus), design$sample_ID) # check that order is correct
-```
-
-# clean data
-```{r}
-# coverage per sample
-coverage <- rowSums(otus)
-
-# rarefy to lowest coverage
-otus.rare <- rrarefy(otus, min(coverage))
+dna <- dna[match(design$sample_ID, rownames(dna)),]
+rna <- rna[match(design$sample_ID, rownames(rna)),]
+all.equal.character(rownames(rna), design$sample_ID) # check that order is correct
+all.equal.character(rownames(dna), design$sample_ID) # check that order is correct
 
 # remove empty columns
-otus <- otus.rare[,-which(colSums(otus.rare) == 0)]
+rna <- rna[,-which(colSums(rna) == 0)]
+dna <- dna[,-which(colSums(dna) == 0)]
+```
 
+### Subset data
+Because many different things can influence bacterial community structure in the marsh over the course of a year (e.g., temperature, productivity), I subset the data to compare across years within the same time point to control for seasonal effects. I chose October, which had the potential to compare between years and is the month of the pulse disturbance. Here, though, I'm just going to select the second year of the experiment since the two years appear similar.
+```{r, include=FALSE}
 # check number of replicates per treatment x time
 design %>% group_by(date, treatment) %>% count() %>% print(n = 100)
-# just subset to the two october treatments
-design.sub <- design[which(months(design$date) %in% "October"),]
-otus.sub <- otus[which(months(design$date) %in% "October"),]
+
+# just subset to the october treatments
+my.month <- "October"
+my.year <- 2016
+
+design.sub <- design[which(months(design$date) %in% my.month & year(design$date) == my.year),]
+rna.sub <- rna[which(months(design$date) %in% my.month & year(design$date) %in% my.year),]
+dna.sub <- dna[which(months(design$date) %in% my.month & year(design$date) %in% my.year),]
 
 # store full site by species matrix in otus.full and make 'otus' the subset
-otus.full <- otus
-otus <- otus.sub
+rna.full <- rna
+rna <- rna.sub
+dna.full <- dna
+dna <- dna.sub
 design.full <- design
 design <- design.sub
 ```
 
+# Results
+## How does the diversity of a local community change under our different experimental treatments?
 
-# Characterize alpha diversity
-```{r}
-otu.rich <- rowSums(decostand(otus, method = "pa"))
+For taxa to persist in a treatment, they must be able to grow locally or immigrate from elsewhere. Here, we just compare an estimate of local (alpha) diversity for the total DNA community and the metabolically active RNA community within each treatment. 
+```{r, fig.align='center', fig.height=5, fig.width=6}
+rna.rich <- rowSums(decostand(rna, method = "pa"))
+dna.rich <- rowSums(decostand(dna, method = "pa"))
+rna.alpha <- exp(diversity(rna, "shannon"))
+dna.alpha <- exp(diversity(dna, "shannon"))
 
-data.frame(otu.rich) %>% rownames_to_column("sample_ID") %>% 
+data.frame(dna = dna.alpha) %>% rownames_to_column("sample_ID") %>% 
+  left_join(data.frame(rna = rna.alpha) %>% rownames_to_column("sample_ID")) %>% 
+  gather(dna, rna, key = "subset", value = "richness") %>% 
   right_join(design) %>% 
-  group_by(date, treatment) %>%
-  ggplot(aes(x = treatment, y = otu.rich, color = treatment, fill = treatment)) +
+  group_by(date, treatment, subset) %>%
+  ggplot(aes(x = treatment, y = richness, color = subset, fill = subset)) +
   # geom_point(alpha = 0.5) +
   geom_boxplot(position = position_dodge(), alpha = 0.5) +
   theme_minimal() + 
-  facet_grid(~ date)
-
-rownames_to_column(data.frame(otu.rich, d1 = exp(diversity(otus, "shannon"))), "sample_ID") %>% 
-  right_join(design) %>% 
-  group_by(date, treatment) %>%
-  ggplot(aes(x = treatment, y = otu.rich, color = treatment, fill = treatment)) +
-  geom_boxplot(alpha = 0.5) +
-  geom_point() + 
-  theme_minimal() + 
-  facet_grid(~ date) + 
-  scale_color_viridis(begin = .2, end = .8, discrete = T) +
-  scale_fill_viridis(begin = .2, end = .8, discrete = T) +
+  facet_grid(~ date) +
+  scale_color_viridis(begin = .2, end = .7, discrete = T) +
+  scale_fill_viridis(begin = .2, end = .7, discrete = T) +
   labs(x = "Treatment", y = "Alpha diversity (species equivalents, D = 1)") +
   ggsave("figures/alpha.png", width = 7, height = 4, units = "in", dpi = 300)
-  
+
 ```
 
+Here we notice that the total community has consistently higher 
 
 # Characterize beta diversity
-```{r}
-otus.hel <- decostand(otus, method = "hellinger")
-otus.dist <- vegdist(otus.hel, method = "euclidean")
-otus.pcoa <- cmdscale(otus.dist, eig = T)
-scores(otus.pcoa)
+```{r, fig.align='center', fig.height=5, fig.width=6}
+dna.hel <- decostand(dna, method = "hellinger")
+dna.dist <- vegdist(dna.hel, method = "euclidean")
+dna.pcoa <- cmdscale(dna.dist, eig = T)
+scores(dna.pcoa)
 # explained variance
-explained <- round(100*eigenvals(otus.pcoa)[c(1,2)]/sum(eigenvals(otus.pcoa)),1)
-as.data.frame(scores(otus.pcoa)) %>% 
+explained <- round(100*eigenvals(dna.pcoa)[c(1,2)]/sum(eigenvals(dna.pcoa)),1)
+as.data.frame(scores(dna.pcoa)) %>% 
   rownames_to_column("sample_ID") %>% 
   left_join(design) %>% 
-  ggplot(aes(x = Dim1, y = Dim2, color = treatment, shape = factor(date))) + 
+  ggplot(aes(x = Dim1, y = Dim2, color = treatment)) + 
   geom_point(size = 5, alpha = 0.5) + 
   coord_fixed() + 
   theme_minimal() +
   scale_color_viridis(begin = .2, end = .8, discrete = T) +
   labs(x = paste0("PCoA 1 (", explained[1],"%)"),
        y = paste0("PCoA 2 (", explained[2],"%)")) + 
-  ggsave("figures/ordination.png", width = 8, height = 6, units = "in", dpi = 300)
+  ggsave("figures/ordination-dna.png", width = 8, height = 6, units = "in", dpi = 300)
 
-design
-perma <- adonis(otus ~ treatment * as.factor(date), method = "euclidean", data = design)
-perma
-```
+rna.hel <- decostand(rna, method = "hellinger")
+rna.dist <- vegdist(rna.hel, method = "euclidean")
+rna.pcoa <- cmdscale(rna.dist, eig = T)
+scores(rna.pcoa)
+# explained variance
+explained <- round(100*eigenvals(rna.pcoa)[c(1,2)]/sum(eigenvals(rna.pcoa)),1)
+as.data.frame(scores(rna.pcoa)) %>% 
+  rownames_to_column("sample_ID") %>% 
+  left_join(design) %>% 
+  ggplot(aes(x = Dim1, y = Dim2, color = treatment)) + 
+  geom_point(size = 5, alpha = 0.5) + 
+  coord_fixed() + 
+  theme_minimal() +
+  scale_color_viridis(begin = .2, end = .8, discrete = T) +
+  scale_y_reverse() +
+  labs(x = paste0("PCoA 1 (", explained[1],"%)"),
+       y = paste0("PCoA 2 (", explained[2],"%)")) + 
+  ggsave("figures/ordination-rna.png", width = 8, height = 6, units = "in", dpi = 300)
 
-```{r}
-dist.full <- vegdist(otus.full, method = "euclidean")
-design.full
+
+perma.rna <- adonis(rna.hel ~ treatment, method = "euclidean", data = design)
+perma.rna
+
+perma.dna <- adonis(dna.hel ~ treatment, method = "euclidean", data = design)
+perma.dna
 ```
