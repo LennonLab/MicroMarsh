@@ -1,8 +1,7 @@
 ---
 title: "Bacterial community responses to salinization"
 author: "Nathan Wisnoski"
-date: '`r format(Sys.Date(), "%B %d, %Y")`'
-output: html_document
+date: '`r format(Sys.time(), "%d %B, %Y")`'
 ---
 
 # Introduction
@@ -12,7 +11,10 @@ Under each type of disturbance regime, community stability can occur in several 
 
 Some organisms may possess traits that buffer against these rapid changes in the environment, increasing the stability of communities in response to disturbance and maintaining adaptive capacity to respond to uncertain future scenarios. One of these traits is metabolic dormancy, a reversible state of reduced metabolic activity that can buffer organisms against suboptimal environmental conditions and can maintain taxonomic, genetic, and functional diversity in a dormant seed bank. 
 
-Among species that inhabit coastal ecosystems at risk for rapid change, bacterial communities are an ideal system in which to investigate stability in response to salinization disturbances. Here, we investigate how bacterial communities in tidal marshes respond to saltwater disturbances, and whether dormancy can buffer communities against rapidly changing environments.
+Among species that inhabit coastal ecosystems at risk for rapid change, bacterial communities are an ideal system in which to investigate stability in response to salinization disturbances. Here, we investigate how bacterial communities in tidal marshes respond to saltwater disturbances, and whether dormancy can buffer communities against rapidly changing environments. Specifically, we'll test the following hypotheses:
+
+1. Pulse and press saltwater disturbances perturb bacterial communities, but press disturbances alter communities more strongly than pulse disturbances.  
+2. Metabolically active (RNA-based) measures of bacterial diversity are more responsive to saltwater disturbances than total (DNA-based) measures of diversity, and may show greater sensitivity to environmental change. 
 
 
 # Methods
@@ -37,7 +39,7 @@ A few things we'll need to do before moving forward with this:
 2. It may also be interesting to take a look at the USV (unique sequence variant) approach, where we don't bin into OTUs, but rather look at sub-OTU-level variation in community structure.  
 
 
-```{r, include=FALSE}
+```{r, include=FALSE, message=FALSE}
 # read in experimental design and change classes and sample names
 design <- read_csv("data/design.csv",
    col_types = cols(
@@ -104,8 +106,8 @@ dna <- dna[,-which(colSums(dna) == 0)]
 ```
 
 ### Subset data
-Because many different things can influence bacterial community structure in the marsh over the course of a year (e.g., temperature, productivity), I subset the data to compare across years within the same time point to control for seasonal effects. I chose October, which had the potential to compare between years and is the month of the pulse disturbance. Here, though, I'm just going to select the second year of the experiment since the two years appear similar.
-```{r, include=FALSE}
+Because many different things can influence bacterial community structure in the marsh over the course of a year (e.g., temperature, productivity), I subset the data to compare across years within the same time point to control for seasonal effects. I chose October, which had the potential to compare between years and is the month of the pulse disturbance. Here, though, I'm just going to select the second year of the experiment to ease visualization because the two years are similar.
+```{r, message=FALSE, include=FALSE}
 # check number of replicates per treatment x time
 design %>% group_by(date, treatment) %>% count() %>% print(n = 100)
 
@@ -130,7 +132,7 @@ design <- design.sub
 ## How does the diversity of a local community change under our different experimental treatments?
 
 For taxa to persist in a treatment, they must be able to grow locally or immigrate from elsewhere. Here, we just compare an estimate of local (alpha) diversity for the total DNA community and the metabolically active RNA community within each treatment. 
-```{r, fig.align='center', fig.height=5, fig.width=6}
+```{r, message=FALSE, fig.align='center', fig.height=5, fig.width=6}
 rna.rich <- rowSums(decostand(rna, method = "pa"))
 dna.rich <- rowSums(decostand(dna, method = "pa"))
 rna.alpha <- exp(diversity(rna, "shannon"))
@@ -153,24 +155,25 @@ data.frame(dna = dna.alpha) %>% rownames_to_column("sample_ID") %>%
 
 ```
 
-Here we notice that the total community has consistently higher 
+Here we notice that the total community has consistently higher diversity overall, suggesting the ability to reduce metabolic activity can help maintain diversity. We also see that freshwater additions and pulse saltwater disturbances support higher alpha-diversity than the control, but press saltwater disturbances show a strong reduction in diversity, specifically in the metabolically active community. The maintenance of diversity in the freshwater and pulse treatments could be due to immigration and weak negative impacts of the pulse. The decrease in diversity with the press disturbance could result from driving freshwater taxa extinct and replacing them with marine taxa. 
 
-# Characterize beta diversity
-```{r, fig.align='center', fig.height=5, fig.width=6}
+## How does saltwater addition change community structure?
+
+Here, we want to know about the diversity among sites (beta diversity). We would predict that the active community (RNA) would be more responsive and show greater shifts in composition than the total community (DNA). However, I need to re-run the sequence processing pipeline to make these two datasets more comparable. Therefore, the following analyses are done between communities within the RNA and DNA pools, but not between them. 
+```{r, message=FALSE, fig.align='center', fig.height=5, fig.width=6}
 dna.hel <- decostand(dna, method = "hellinger")
 dna.dist <- vegdist(dna.hel, method = "euclidean")
 dna.pcoa <- cmdscale(dna.dist, eig = T)
-scores(dna.pcoa)
 # explained variance
 explained <- round(100*eigenvals(dna.pcoa)[c(1,2)]/sum(eigenvals(dna.pcoa)),1)
 as.data.frame(scores(dna.pcoa)) %>% 
   rownames_to_column("sample_ID") %>% 
   left_join(design) %>% 
   ggplot(aes(x = Dim1, y = Dim2, color = treatment)) + 
-  geom_point(size = 5, alpha = 0.5) + 
+  geom_point(size = 5, alpha = 0.6) + 
   coord_fixed() + 
   theme_minimal() +
-  scale_color_viridis(begin = .2, end = .8, discrete = T) +
+  scale_color_viridis(begin = 0, end = .9, discrete = T) +
   labs(x = paste0("PCoA 1 (", explained[1],"%)"),
        y = paste0("PCoA 2 (", explained[2],"%)")) + 
   ggsave("figures/ordination-dna.png", width = 8, height = 6, units = "in", dpi = 300)
@@ -185,11 +188,10 @@ as.data.frame(scores(rna.pcoa)) %>%
   rownames_to_column("sample_ID") %>% 
   left_join(design) %>% 
   ggplot(aes(x = Dim1, y = Dim2, color = treatment)) + 
-  geom_point(size = 5, alpha = 0.5) + 
+  geom_point(size = 5, alpha = 0.6) + 
   coord_fixed() + 
   theme_minimal() +
-  scale_color_viridis(begin = .2, end = .8, discrete = T) +
-  scale_y_reverse() +
+  scale_color_viridis(begin = 0, end = .9, discrete = T) +
   labs(x = paste0("PCoA 1 (", explained[1],"%)"),
        y = paste0("PCoA 2 (", explained[2],"%)")) + 
   ggsave("figures/ordination-rna.png", width = 8, height = 6, units = "in", dpi = 300)
@@ -201,3 +203,10 @@ perma.rna
 perma.dna <- adonis(dna.hel ~ treatment, method = "euclidean", data = design)
 perma.dna
 ```
+
+From this preliminary analysis, it seems that there are not any systematic differences between the responses of DNA and RNA-based communities to the saltwater treatments. However, when the raw data has been reanalyzed through the same pipeline, we'll be able to compare the magnitude of responses and compare species-specific responses to the experimental manipulations. This should be much more informative. 
+
+# Preliminary conclusions
+However, even with the current analysis, we can say some things conclusively. The press disturbance does have a strong effect on the structure of the total and active communities, suggesting saltwater intrusion may have lasting effects on composition. Indeed, the PERMANOVA indicates that treatment variable explains more of the variation in the total bacterial communities than in the active communities. 
+
+In contrast to the press disturbance, the pulse disturbance does not cause strong deviations from the freshwater community, which suggests that short-term intrusions may not lead to tipping points in these bacterial communities, suggesting that they have some degree of resistence and possibly resilience (which I could assess in some of the other time points).
