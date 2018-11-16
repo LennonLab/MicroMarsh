@@ -54,6 +54,15 @@ design <- read_csv("data/design.csv",
 # dna <- read_csv("data/DNA_otus.csv")
 # rna <- read_csv("data/cDNA_otus.csv")
 
+dna.tax <- read_csv("data/DNA_otus.csv") %>% 
+  mutate(otu = `OTU ID`) %>% 
+  select(taxonomy, otu)
+
+rna.tax <- read_csv("data/cDNA_otus.csv") %>% 
+  mutate(otu = `OTU ID`) %>% 
+  select(taxonomy, otu)
+
+
 # create site by species matrices
 dna <- read_csv("data/DNA_otus.csv") %>% select(-taxonomy) %>% t()
 colnames(dna) <- paste0("otu", (dna[1, ] + 1))
@@ -92,7 +101,7 @@ dna <- rrarefy(dna,  min(dna.coverage))
 # update design object to reflect paired rna and dna samples
 design <- inner_join(data_frame(sample_ID = rownames(dna)), 
            data_frame(sample_ID = rownames(rna))) %>% 
-  inner_join(design) %>% filter(treatment != "C")
+  inner_join(design) %>% filter(treatment %in% c("F", "PU", "PR"))
 
 # reorder the otu table to match design
 dna <- dna[match(design$sample_ID, rownames(dna)),]
@@ -113,9 +122,9 @@ design %>% group_by(date, treatment) %>% count() %>% print(n = 100)
 
 # just subset to the october treatments
 my.month <- "October"
-my.year <- 2016
+my.year <- c(2015, 2016)
 
-design.sub <- design[which(months(design$date) %in% my.month & year(design$date) == my.year),]
+design.sub <- design[which(months(design$date) %in% my.month & year(design$date) %in% my.year),]
 rna.sub <- rna[which(months(design$date) %in% my.month & year(design$date) %in% my.year),]
 dna.sub <- dna[which(months(design$date) %in% my.month & year(design$date) %in% my.year),]
 
@@ -151,7 +160,7 @@ data.frame(dna = dna.alpha) %>% rownames_to_column("sample_ID") %>%
   scale_color_viridis(begin = .2, end = .7, discrete = T) +
   scale_fill_viridis(begin = .2, end = .7, discrete = T) +
   labs(x = "Treatment", y = "Alpha diversity (species equivalents, D = 1)") +
-  ggsave("figures/alpha.png", width = 7, height = 4, units = "in", dpi = 300)
+  ggsave("figures/alpha.png", width = 7, height = 4, units = "in", dpi = 500)
 
 ```
 
@@ -176,7 +185,7 @@ as.data.frame(scores(dna.pcoa)) %>%
   scale_color_viridis(begin = 0, end = .9, discrete = T) +
   labs(x = paste0("PCoA 1 (", explained[1],"%)"),
        y = paste0("PCoA 2 (", explained[2],"%)")) + 
-  ggsave("figures/ordination-dna.png", width = 8, height = 6, units = "in", dpi = 300)
+  ggsave("figures/ordination-dna.png", width = 8, height = 6, units = "in", dpi = 500)
 
 rna.hel <- decostand(rna, method = "hellinger")
 rna.dist <- vegdist(rna.hel, method = "euclidean")
@@ -194,7 +203,7 @@ as.data.frame(scores(rna.pcoa)) %>%
   scale_color_viridis(begin = 0, end = .9, discrete = T) +
   labs(x = paste0("PCoA 1 (", explained[1],"%)"),
        y = paste0("PCoA 2 (", explained[2],"%)")) + 
-  ggsave("figures/ordination-rna.png", width = 8, height = 6, units = "in", dpi = 300)
+  ggsave("figures/ordination-rna.png", width = 8, height = 6, units = "in", dpi = 500)
 
 
 perma.rna <- adonis(rna.hel ~ treatment, method = "euclidean", data = design)
@@ -205,6 +214,58 @@ perma.dna
 ```
 
 From this preliminary analysis, it seems that there are not any systematic differences between the responses of DNA and RNA-based communities to the saltwater treatments. However, when the raw data has been reanalyzed through the same pipeline, we'll be able to compare the magnitude of responses and compare species-specific responses to the experimental manipulations. This should be much more informative. 
+
+## Taxonomic analyses
+```{r}
+dna.tax.expand <- dna.tax %>% separate(taxonomy, into = c("domain", "phylum", "class", "order", "family", "genus", "species"), ";")
+unique(dna.tax.expand$order)
+desulf.tax <- c(
+  "o:Desulfurellales",
+  "o:Desulfovibrionales",
+  "o:Desulfobacterales",
+  "o:Desulfarculales",
+  "o:Desulfuromonadales"
+)
+desulf.otus <- dna.tax.expand %>% filter(order %in% desulf.tax) %>% select(otu)
+desulf.cols <- which(colnames(dna) %in% paste0("otu",desulf.otus$otu))
+dna.rel <- decostand(dna, method = 'total')
+as.data.frame(dna.rel[,desulf.cols]) %>% 
+  rownames_to_column(var = "sample_ID") %>% 
+  gather(-sample_ID, key = otu, value = abundance) %>% 
+  left_join(design) %>% 
+  group_by(date, treatment, otu) %>% 
+  summarise(meanabund = mean(abundance), sdabund = sd(abundance)) %>%
+  filter(meanabund > 0) %>%
+  ggplot(aes(x = treatment, y = meanabund, color = otu)) +
+  geom_point(show.legend = F) +
+  theme_minimal() +
+  facet_grid(. ~ date)
+
+
+rna.tax.expand <- rna.tax %>% separate(taxonomy, into = c("domain", "phylum", "class", "order", "family", "genus", "species"), ";")
+unique(rna.tax.expand$order)
+desulf.tax <- c(
+  "o:Desulfurellales",
+  "o:Desulfovibrionales",
+  "o:Desulfobacterales",
+  "o:Desulfarculales",
+  "o:Desulfuromonadales"
+)
+desulf.otus <- rna.tax.expand %>% filter(order %in% desulf.tax) %>% select(otu)
+desulf.cols <- which(colnames(rna) %in% paste0("otu",desulf.otus$otu))
+rna.rel <- decostand(rna, method = 'total')
+as.data.frame(rna.rel[,desulf.cols]) %>% 
+  rownames_to_column(var = "sample_ID") %>% 
+  gather(-sample_ID, key = otu, value = abundance) %>% 
+  left_join(design) %>% 
+  group_by(date, treatment, otu) %>% 
+  summarise(meanabund = mean(abundance), sdabund = sd(abundance)) %>%
+  filter(meanabund > 0) %>%
+  ggplot(aes(x = treatment, y = meanabund, color = otu)) +
+  geom_point(show.legend = F) +
+  theme_minimal() +
+  facet_grid(. ~ date)
+```
 
 # Preliminary conclusions
 However, even with the current analysis, we can say some things conclusively. The press disturbance does have a strong effect on the structure of the total and active communities, suggesting saltwater intrusion may have lasting effects on composition. Indeed, the PERMANOVA indicates that treatment variable explains more of the variation in the total bacterial communities than in the active communities. 
