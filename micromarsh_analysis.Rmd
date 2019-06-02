@@ -49,69 +49,63 @@ design <- read_csv("data/design.csv",
      replicate = col_integer())) %>% 
   mutate(sample_ID = paste0("s", gsub("\\_", "", sample_ID))) %>% 
   arrange(date)
+design <- rbind(
+  cbind(design, molecule = "DNA"),
+  cbind(design, molecule = "RNA")
+)
+design <- design %>% 
+  mutate(sample_ID = ifelse(
+    molecule == "DNA",
+    sample_ID,
+    paste0(sample_ID, "_cDNA")))
+
+otus <- read_tsv("data/otu.tsv") %>% select(-taxonomy) %>% t()
+colnames(otus) <- paste0("otu", (otus[1, ]))
+otus <- otus[-1,]
+otus[,1:10]
 
 # # need to establish joint otus, they don't align between dna and rna data yet
 # dna <- read_csv("data/DNA_otus.csv")
 # rna <- read_csv("data/cDNA_otus.csv")
 
-dna.tax <- read_csv("data/DNA_otus.csv") %>% 
-  mutate(otu = `OTU ID`) %>% 
-  select(taxonomy, otu)
-
-rna.tax <- read_csv("data/cDNA_otus.csv") %>% 
-  mutate(otu = `OTU ID`) %>% 
-  select(taxonomy, otu)
+# dna.tax <- read_csv("data/DNA_otus.csv") %>% 
+#   mutate(otu = `OTU ID`) %>% 
+#   select(taxonomy, otu)
+# 
+# rna.tax <- read_csv("data/cDNA_otus.csv") %>% 
+#   mutate(otu = `OTU ID`) %>% 
+#   select(taxonomy, otu)
 
 
 # create site by species matrices
-dna <- read_csv("data/DNA_otus.csv") %>% select(-taxonomy) %>% t()
-colnames(dna) <- paste0("otu", (dna[1, ] + 1))
-dna <- dna[-1,]
-head(dna)[,1:10]
-
-rna <- read_csv("data/cDNA_otus.csv") %>% select(-taxonomy) %>% t()
-colnames(rna) <- paste0("otu", (rna[1, ] + 1))
-rna <- rna[-1,]
-head(rna)[,1:10]
+rna <- otus[(rownames(otus) %>% endsWith("_cDNA")),]
+dna <- otus[!(rownames(otus) %>% endsWith("_cDNA")),]
 
 # make rownames of otutable match sample names
-rnames <- gsub("7_1", "07_1", rownames(dna)) # make dates two digits
+rnames <- gsub("7_1", "07_1", rownames(otus)) # make dates two digits
 rnames <- gsub("3_1", "03_1", rnames)
 rnames <- gsub("\\_", "", rnames) # remove underscores
+rnames <- gsub("cDNA", "_cDNA", rnames)
 rnames <- paste0("s",rnames)
-rownames(dna) <- rnames
+rownames(otus) <- rnames
 
-rnames <- gsub("7_1", "07_1", rownames(rna)) # make dates two digits
-rnames <- gsub("3_1", "03_1", rnames)
-rnames <- gsub("\\_", "", rnames) # remove underscores
-rnames <- gsub("cDNA", "", rnames) # remove cDNA
-rnames <- paste0("s",rnames)
-rownames(rna) <- rnames
 
 # coverage per sample and rarefy to lowest coverage
-rna.coverage <- rowSums(rna)
-dna.coverage <- rowSums(dna)
-rna <- rna[which(rna.coverage > 20000),]
-dna <- dna[which(dna.coverage > 20000),]
-rna.coverage <- rowSums(rna)
-dna.coverage <- rowSums(dna)
-rna <- rrarefy(rna,  min(rna.coverage))
-dna <- rrarefy(dna,  min(dna.coverage))
+coverage <- rowSums(otus)
+otus <- otus[which(coverage > 10000),]
 
-# update design object to reflect paired rna and dna samples
-design <- inner_join(data_frame(sample_ID = rownames(dna)), 
-           data_frame(sample_ID = rownames(rna))) %>% 
-  inner_join(design) %>% filter(treatment %in% c("F", "PU", "PR"))
+otus <- rrarefy(otus,  min(coverage))
+
+
+# update design object to reflect the samples
+design <- inner_join(tibble(sample_ID = rownames(otus)), design) 
 
 # reorder the otu table to match design
-dna <- dna[match(design$sample_ID, rownames(dna)),]
-rna <- rna[match(design$sample_ID, rownames(rna)),]
-all.equal.character(rownames(rna), design$sample_ID) # check that order is correct
-all.equal.character(rownames(dna), design$sample_ID) # check that order is correct
+otus <- otus[match(design$sample_ID, rownames(otus)),]
+all.equal.character(rownames(otus), design$sample_ID) # check that order is correct
 
 # remove empty columns
-rna <- rna[,-which(colSums(rna) == 0)]
-dna <- dna[,-which(colSums(dna) == 0)]
+otus <- otus[,-which(colSums(otus) == 0)]
 ```
 
 ### Subset data
@@ -125,14 +119,11 @@ my.month <- "October"
 my.year <- c(2015, 2016)
 
 design.sub <- design[which(months(design$date) %in% my.month & year(design$date) %in% my.year),]
-rna.sub <- rna[which(months(design$date) %in% my.month & year(design$date) %in% my.year),]
-dna.sub <- dna[which(months(design$date) %in% my.month & year(design$date) %in% my.year),]
+otus.sub <- otus[which(months(design$date) %in% my.month & year(design$date) %in% my.year),]
 
 # store full site by species matrix in otus.full and make 'otus' the subset
-rna.full <- rna
-rna <- rna.sub
-dna.full <- dna
-dna <- dna.sub
+otus.full <- otus
+otus <- otus.sub
 design.full <- design
 design <- design.sub
 ```
@@ -142,17 +133,13 @@ design <- design.sub
 
 For taxa to persist in a treatment, they must be able to grow locally or immigrate from elsewhere. Here, we just compare an estimate of local (alpha) diversity for the total DNA community and the metabolically active RNA community within each treatment. 
 ```{r, message=FALSE, fig.align='center', fig.height=5, fig.width=6}
-rna.rich <- rowSums(decostand(rna, method = "pa"))
-dna.rich <- rowSums(decostand(dna, method = "pa"))
-rna.alpha <- exp(diversity(rna, "shannon"))
-dna.alpha <- exp(diversity(dna, "shannon"))
+otus.rich <- rowSums(decostand(otus, method = "pa"))
+otus.alpha <- exp(diversity(otus, "shannon"))
 
-data.frame(dna = dna.alpha) %>% rownames_to_column("sample_ID") %>% 
-  left_join(data.frame(rna = rna.alpha) %>% rownames_to_column("sample_ID")) %>% 
-  gather(dna, rna, key = "subset", value = "richness") %>% 
-  right_join(design) %>% 
-  group_by(date, treatment, subset) %>%
-  ggplot(aes(x = treatment, y = richness, color = subset, fill = subset)) +
+data.frame(richness = otus.rich, diversity = otus.alpha) %>% rownames_to_column("sample_ID") %>% 
+  left_join(design) %>% 
+  group_by(date, treatment, molecule) %>%
+  ggplot(aes(x = treatment, y = diversity, color = molecule, fill = molecule)) +
   # geom_point(alpha = 0.5) +
   geom_boxplot(position = position_dodge(), alpha = 0.5) +
   theme_minimal() + 
@@ -170,12 +157,12 @@ Here we notice that the total community has consistently higher diversity overal
 
 Here, we want to know about the diversity among sites (beta diversity). We would predict that the active community (RNA) would be more responsive and show greater shifts in composition than the total community (DNA). However, I need to re-run the sequence processing pipeline to make these two datasets more comparable. Therefore, the following analyses are done between communities within the RNA and DNA pools, but not between them. 
 ```{r, message=FALSE, fig.align='center', fig.height=5, fig.width=6}
-dna.hel <- decostand(dna, method = "hellinger")
-dna.dist <- vegdist(dna.hel, method = "euclidean")
-dna.pcoa <- cmdscale(dna.dist, eig = T)
+otus.hel <- decostand(otus, method = "hellinger")
+otus.dist <- vegdist(otus.hel, method = "euclidean")
+otus.pcoa <- cmdscale(otus.dist, eig = T)
 # explained variance
-explained <- round(100*eigenvals(dna.pcoa)[c(1,2)]/sum(eigenvals(dna.pcoa)),1)
-as.data.frame(scores(dna.pcoa)) %>% 
+explained <- round(100*eigenvals(otus.pcoa)[c(1,2)]/sum(eigenvals(otus.pcoa)),1)
+as.data.frame(scores(otus.pcoa)) %>% 
   rownames_to_column("sample_ID") %>% 
   left_join(design) %>% 
   ggplot(aes(x = Dim1, y = Dim2, color = treatment)) + 
@@ -185,32 +172,13 @@ as.data.frame(scores(dna.pcoa)) %>%
   scale_color_viridis(begin = 0, end = .9, discrete = T) +
   labs(x = paste0("PCoA 1 (", explained[1],"%)"),
        y = paste0("PCoA 2 (", explained[2],"%)")) + 
-  ggsave("figures/ordination-dna.png", width = 8, height = 6, units = "in", dpi = 500)
-
-rna.hel <- decostand(rna, method = "hellinger")
-rna.dist <- vegdist(rna.hel, method = "euclidean")
-rna.pcoa <- cmdscale(rna.dist, eig = T)
-scores(rna.pcoa)
-# explained variance
-explained <- round(100*eigenvals(rna.pcoa)[c(1,2)]/sum(eigenvals(rna.pcoa)),1)
-as.data.frame(scores(rna.pcoa)) %>% 
-  rownames_to_column("sample_ID") %>% 
-  left_join(design) %>% 
-  ggplot(aes(x = Dim1, y = Dim2, color = treatment)) + 
-  geom_point(size = 5, alpha = 0.6) + 
-  coord_fixed() + 
-  theme_minimal() +
-  scale_color_viridis(begin = 0, end = .9, discrete = T) +
-  labs(x = paste0("PCoA 1 (", explained[1],"%)"),
-       y = paste0("PCoA 2 (", explained[2],"%)")) + 
-  ggsave("figures/ordination-rna.png", width = 8, height = 6, units = "in", dpi = 500)
+  facet_wrap(~molecule) +
+  stat_ellipse() +
+  ggsave("figures/ordination.png", width = 10, height = 6, units = "in", dpi = 500)
 
 
-perma.rna <- adonis(rna.hel ~ treatment, method = "euclidean", data = design)
-perma.rna
-
-perma.dna <- adonis(dna.hel ~ treatment, method = "euclidean", data = design)
-perma.dna
+perma.otus <- adonis(otus.hel ~ treatment * molecule, method = "euclidean", data = design)
+perma.otus
 ```
 
 From this preliminary analysis, it seems that there are not any systematic differences between the responses of DNA and RNA-based communities to the saltwater treatments. However, when the raw data has been reanalyzed through the same pipeline, we'll be able to compare the magnitude of responses and compare species-specific responses to the experimental manipulations. This should be much more informative. 
