@@ -67,6 +67,10 @@ colnames(otus) <- paste0("otu", (otus[1, ]))
 otus <- otus[-1,]
 otus[,1:10]
 
+tax <- read_tsv("data/tax.tsv", 
+                col_names = F) %>% 
+  select(X1, X3) %>% 
+  rename(OTU = X1, taxonomy = X3)
 
 # create site by species matrices
 rna <- otus[(rownames(otus) %>% endsWith("_cDNA")),]
@@ -101,7 +105,7 @@ otus <- otus[,-which(colSums(otus) == 0)]
 
 # read environmenal data
 env <- read_csv("data/env_data.csv")
-env$date <- date(paste0(env$Year,'-',env$Month,'-01'))
+env$date <- as_date(paste0(env$Year,'-',env$Month,'-01'))
 colnames(env)[4:5] <- c("treatment", "replicate")
 env <- inner_join(design, env)
 ```
@@ -183,7 +187,7 @@ From this preliminary analysis, it seems that there are not any systematic diffe
 ```{r}
 tax.expand <- tax %>% separate(taxonomy, into = c("domain", "phylum", "class", "order", "family", "genus", "species"), ",")
 desulf.tax <- tax.expand %>% group_by(domain, phylum, class, order, family, genus, species) %>% 
-  filter(stringr::str_detect(order, "sulf"))
+  filter(stringr::str_detect(order, "sulf")|stringr::str_detect(order, "Sulf"))
 unique(desulf.tax$OTU)
 
 desulf.cols <- which(colnames(otus) %in% paste0("otu",desulf.tax$OTU))
@@ -195,16 +199,34 @@ as.data.frame(rowSums(otus.rel[,desulf.cols])) %>%
   left_join(design) %>% 
   group_by(date, treatment, molecule) %>% 
   ggplot(aes(x = treatment, y = sulf_percent)) +
-  geom_jitter(alpha = 0.25, show.legend = F) +
+  #geom_jitter(alpha = 0.25, show.legend = F) +
   geom_boxplot(alpha = 0.5) +
   #scale_y_log10() +
   facet_grid(molecule ~ date) + 
   labs(y = "Percent potential sulfate reducers", x = "") +
-  ggsave("figures/sulfate-reduction.png", width = 7, height = 5, units = "in", dpi = 500)
+  ggsave("figures/sulfate-reduction.png", width = 5, height = 5, units = "in", dpi = 500)
 
 env %>% 
   ggplot(aes(y = `Salinity (ppt) (converted from Cl)`, x = treatment)) + 
   geom_point()
+
+methan.tax <- tax.expand %>% group_by(domain, phylum, class, order, family, genus, species) %>% 
+  filter(stringr::str_detect(family, "Meth") | stringr::str_detect(genus, "Meth"))
+unique(methan.tax$OTU)
+methan.cols <- which(colnames(otus) %in% paste0("otu",methan.tax$OTU))
+as.data.frame(rowSums(otus.rel[,methan.cols])) %>% 
+  rownames_to_column(var = "sample_ID") %>% 
+  rename(methan_percent = "rowSums(otus.rel[, methan.cols])") %>% 
+  # gather(-sample_ID, key = otu, value = abundance) %>% 
+  left_join(design) %>% 
+  group_by(date, treatment, molecule) %>% 
+  ggplot(aes(x = treatment, y = methan_percent)) +
+  #geom_jitter(alpha = 0.25, show.legend = F) +
+  geom_boxplot(alpha = 0.5) +
+  #scale_y_log10() +
+  facet_grid(molecule ~ date) + 
+  labs(y = "Percent potential methanogens", x = "") + 
+  ggsave("figures/methanogens.png", width = 5, height = 5, units = "in", dpi = 500)
 ```
 
 # Preliminary conclusions
