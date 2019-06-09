@@ -143,7 +143,7 @@ data.frame(richness = otus.rich, diversity = otus.alpha) %>% rownames_to_column(
   group_by(date, treatment, molecule) %>%
   ggplot(aes(x = treatment, y = diversity, fill = molecule)) +
   # geom_point(alpha = 0.5) +
-  geom_boxplot(position = position_dodge(), alpha = 0.5) +
+  geom_boxplot(position = position_dodge(), alpha = .7) +
   facet_grid(~ date) +
   scale_fill_grey() +
   labs(x = "", y = "Alpha diversity (species equivalents, D = 1)") +
@@ -200,14 +200,14 @@ as.data.frame(rowSums(otus.rel[,desulf.cols])) %>%
   group_by(date, treatment, molecule) %>% 
   ggplot(aes(x = treatment, y = sulf_percent)) +
   #geom_jitter(alpha = 0.25, show.legend = F) +
-  geom_boxplot(alpha = 0.5) +
+  geom_boxplot(alpha = 1) +
   #scale_y_log10() +
   facet_grid(molecule ~ date) + 
   labs(y = "Percent potential sulfate reducers", x = "") +
   ggsave("figures/sulfate-reduction.png", width = 5, height = 5, units = "in", dpi = 500)
 
 env %>% 
-  ggplot(aes(y = `Salinity (ppt) (converted from Cl)`, x = treatment)) + 
+  ggplot(aes(y = Salinity, x = treatment)) + 
   geom_point()
 
 methan.tax <- tax.expand %>% group_by(domain, phylum, class, order, family, genus, species) %>% 
@@ -222,12 +222,49 @@ as.data.frame(rowSums(otus.rel[,methan.cols])) %>%
   group_by(date, treatment, molecule) %>% 
   ggplot(aes(x = treatment, y = methan_percent)) +
   #geom_jitter(alpha = 0.25, show.legend = F) +
-  geom_boxplot(alpha = 0.5) +
+  geom_boxplot(alpha = 1) +
   #scale_y_log10() +
   facet_grid(molecule ~ date) + 
   labs(y = "Percent potential methanogens", x = "") + 
   ggsave("figures/methanogens.png", width = 5, height = 5, units = "in", dpi = 500)
 ```
+
+```{r}
+env_vars <- env %>% select(molecule, DRP, NH4, NO2_3, DOC, Sulfides, Cl, Salinity, Soil_surface_temp)
+
+rda.out <- rda(otus ~ ., data = env_vars)
+
+env.vecs <- as.data.frame(rda.out$CCA$biplot[,c(1,2)])
+scale.vecs <- 100
+explained <- round(100*eigenvals(rda.out)[c(1,2)]/sum(eigenvals(rda.out)),1)
+as.data.frame(scores(rda.out)$sites) %>% 
+  rownames_to_column("sample_ID") %>% 
+  left_join(design) %>% 
+  ggplot(aes(x = RDA1, y = RDA2, color = treatment)) + 
+  geom_point(size = 5, alpha = 0.6) + 
+  coord_fixed() + 
+  #
+  scale_color_viridis(begin = 0, end = .9, discrete = T) +
+  labs(x = paste0("PCoA 1 (", explained[1],"%)"),
+       y = paste0("PCoA 2 (", explained[2],"%)")) + 
+  geom_segment(data = env.vecs, size = .5,
+               aes(x = 0, y = 0,
+                   xend = scale.vecs*RDA1, 
+                   yend = scale.vecs*RDA2), 
+               alpha = 1, color = "black",
+               arrow = arrow(angle = 20, 
+                             length = unit(.1, "inches"),
+                             type = "open")) +
+  geom_label_repel(data = env.vecs, size = 3,
+                  aes(x = (scale.vecs-.2)*RDA1,
+                      y = (scale.vecs-.2)*RDA2,
+                      label = rownames(env.vecs)),
+                  color = "black", segment.alpha = 0) +
+  stat_ellipse() +
+  ggsave("figures/rda.png", width = 10, height = 6, units = "in", dpi = 500)
+
+```
+
 
 # Preliminary conclusions
 However, even with the current analysis, we can say some things conclusively. The press disturbance does have a strong effect on the structure of the total and active communities, suggesting saltwater intrusion may have lasting effects on composition. Indeed, the PERMANOVA indicates that treatment variable explains more of the variation in the total bacterial communities than in the active communities. 
