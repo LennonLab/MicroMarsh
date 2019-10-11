@@ -1,17 +1,27 @@
 ---
-title: "MicroMarsh"
-author: "Nathan Wisnoski"
-date: "8/8/2018"
-output: html_document
+title: "Bacterial community responses to salinization"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
 ---
 
+
+
+## Setup
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(vegan)
+library(viridis)
+library(lubridate)
+library(pander)
+library(ggrepel)
+
+theme_set(theme_bw() + 
+            theme(strip.background = element_blank(), panel.grid.minor = element_blank()))
 ```
 
-# Load the data
-```{r}
+### Load and clean the data
+
+
+```{r, include=FALSE, message=FALSE}
 # read in experimental design and change classes and sample names
 design <- read_csv("data/design.csv",
    col_types = cols(
@@ -21,51 +31,214 @@ design <- read_csv("data/design.csv",
      replicate = col_integer())) %>% 
   mutate(sample_ID = paste0("s", gsub("\\_", "", sample_ID))) %>% 
   arrange(date)
+design <- rbind(
+  cbind(design, molecule = "DNA"),
+  cbind(design, molecule = "RNA")
+)
+design <- design %>% 
+  mutate(sample_ID = ifelse(
+    molecule == "DNA",
+    sample_ID,
+    paste0(sample_ID, "_cDNA")))
 
-# create site by species matrix
-otus <- read_csv("data/cDNA iTag data.csv") %>% select(-taxonomy) %>% t()
-colnames(otus) <- paste0("otu", (otus[1, ] + 1))
+otus <- read_tsv("data/otu.tsv") %>% select(-taxonomy) %>% t()
+colnames(otus) <- paste0("otu", (otus[1, ]))
 otus <- otus[-1,]
-head(otus)[,1:10]
+head(otus[,1:10])
+
+tax <- read_tsv("data/tax.tsv", 
+                col_names = F) %>% 
+  select(X1, X3) %>% 
+  rename(OTU = X1, taxonomy = X3)
+
+# create site by species matrices
+rna <- otus[(rownames(otus) %>% endsWith("_cDNA")),]
+dna <- otus[!(rownames(otus) %>% endsWith("_cDNA")),]
 
 # make rownames of otutable match sample names
 rnames <- gsub("7_1", "07_1", rownames(otus)) # make dates two digits
 rnames <- gsub("3_1", "03_1", rnames)
 rnames <- gsub("\\_", "", rnames) # remove underscores
-rnames <- gsub("cDNA", "", rnames) # remove cDNA
+rnames <- gsub("cDNA", "_cDNA", rnames)
 rnames <- paste0("s",rnames)
 rownames(otus) <- rnames
+
+
+# update design object to reflect the samples
+design <- inner_join(tibble(sample_ID = rownames(otus)), design) %>% 
+  filter(molecule == "DNA") %>% 
+  filter(treatment %in% c("C", "F", "PU", "PR")) %>% 
+  filter(month(date, label = T) %in% c("Oct")) %>% 
+  filter(year(date) %in% c(2016)) # subset just to sequential fall samples
 
 # reorder the otu table to match design
 otus <- otus[match(design$sample_ID, rownames(otus)),]
 all.equal.character(rownames(otus), design$sample_ID) # check that order is correct
-```
 
-# clean data
-```{r}
-# coverage per sample
+# coverage per sample and rarefy to lowest coverage
 coverage <- rowSums(otus)
-
-# rarefy to lowest coverage
-otus.rare <- rrarefy(otus, min(coverage))
+otus <- otus[which(coverage > 10000),]
+otus <- rrarefy(otus,  min(coverage))
 
 # remove empty columns
-otus <- otus.rare[,-which(colSums(otus.rare) == 0)]
+otus <- otus[,-which(colSums(otus) == 0)]
+
+# read environmenal data
+env <- read_csv("data/env_data.csv")
+env$date <- as_date(paste0(env$Year,'-',env$Month,'-01'))
+colnames(env)[4:5] <- c("treatment", "replicate")
+env <- inner_join(design, env)
+
+levels(design$treatment) <- c("Control", "Control with sides", "Freshwater", "Pulse", "Press")
 ```
+Here i focused just on the control, freshwater, pulse, press treatments in October 2016.
 
+# Results
+## How does the diversity of a local community change under our different experimental treatments?
 
-# Characterize alpha diversity
-```{r}
-otu.rich <- rowSums(decostand(otus, method = "pa"))
-rownames_to_column(data.frame(otu.rich, d1 = exp(diversity(otus, "shannon"))), "sample_ID") %>% 
-  right_join(design) %>% 
-  group_by(date, treatment) %>%
-  ggplot(aes(x = treatment, y = otu.rich, color = treatment, fill = treatment)) +
+For taxa to persist in a treatment, they must be able to grow locally or immigrate from elsewhere. Here, we compare an estimate of local (alpha) diversity for the total DNA community within each treatment. 
+```{r, message=FALSE, fig.align='center', fig.height=5, fig.width=6}
+otus.rich <- rowSums(decostand(otus, method = "pa"))
+otus.alpha <- exp(diversity(otus, "shannon"))
+
+data.frame(richness = otus.rich, diversity = otus.alpha) %>% rownames_to_column("sample_ID") %>% 
+  left_join(design) %>% 
+  group_by(date, treatment, molecule) %>%
+  ggplot(aes(x = treatment, y = diversity)) +
   # geom_point(alpha = 0.5) +
-  geom_boxplot(position = position_dodge(), alpha = 0.5) +
-  theme_minimal() + 
-  facet_grid(~ date)
+  geom_boxplot(position = position_dodge(), alpha = .7) +
+  labs(x = "", y = expression(paste(alpha,"-diversity (species equivalents, D = 1)"))) +
+  ggsave("figures/alpha.png", width = 5, height = 3/4*5, units = "in", dpi = 500)
 
-
+alpha.by.treat <- data.frame(richness = otus.rich, diversity = otus.alpha) %>% rownames_to_column("sample_ID") %>% 
+  left_join(design)
+alpha.mod <- aov(diversity ~ treatment, data = alpha.by.treat)
+summary(alpha.mod)
+plot(TukeyHSD(alpha.mod))
 ```
 
+Here we notice that the total community has consistently higher diversity overall. We also see that freshwater additions and pulse saltwater disturbances support lower alpha-diversity than the control, but press saltwater disturbances show a stronger reduction in diversity. ANOVA indicates there are significant differences between the treatments. Tukey's post hoc test suggests there are significant differences between press and freshwater treatments, and between press and control treatments. 
+
+## How does saltwater addition change community structure?
+
+Here, we want to know about the diversity among sites (beta diversity). 
+```{r, message=FALSE, fig.align='center', fig.height=5, fig.width=6}
+otus.hel <- decostand(otus, method = "hellinger")
+otus.dist <- vegdist(otus.hel, method = "euclidean")
+otus.pcoa <- cmdscale(otus.dist, eig = T)
+# explained variance
+explained <- round(100*eigenvals(otus.pcoa)[c(1,2)]/sum(eigenvals(otus.pcoa)),1)
+as.data.frame(scores(otus.pcoa)) %>% 
+  rownames_to_column("sample_ID") %>% 
+  left_join(design) %>% 
+  ggplot(aes(x = Dim1, y = Dim2, color = treatment)) + 
+  geom_point(size = 5, alpha = 0.6) + 
+  coord_fixed() + 
+  scale_color_viridis("", begin = 0, end = .9, discrete = T) +
+  labs(x = paste0("PCoA 1 (", explained[1],"%)"),
+       y = paste0("PCoA 2 (", explained[2],"%)")) + 
+  stat_ellipse() +
+  ggsave("figures/ordination.png", width = 5, height = 5, units = "in", dpi = 500)
+
+
+perma.otus <- adonis(otus.hel ~ treatment, method = "euclidean", data = design)
+pander(perma.otus$aov.tab)
+```
+
+From this analysis, it seems that there is a gradient from freshwater, to pulse, to press treatments, with press treatments having the strongest effect on community structure. A PERMANOVA shows that treatment is a significant predictor of differences in community structure, explaining approx. 54% of the differences.
+
+## Redundancy Analysis
+We can take this a step further by constraining our ordination by environmental variables to see which variables in particular are associated with differences in community structure. We'll perform a Redundancy Analysis (RDA).
+
+```{r}
+env_vars <- env %>% select(DRP, NH4, NO2_3, Sulfides, Salinity, Soil_surface_temp)
+
+rda.out <- rda(otus ~ ., data = env_vars)
+
+env.vecs <- as.data.frame(rda.out$CCA$biplot[,c(1,2)])
+scale.vecs <- 100
+explained <- round(100*eigenvals(rda.out)[c(1,2)]/sum(eigenvals(rda.out)),1)
+as.data.frame(scores(rda.out)$sites) %>% 
+  rownames_to_column("sample_ID") %>% 
+  left_join(design) %>% 
+  ggplot(aes(x = RDA1, y = RDA2, color = treatment)) + 
+  geom_point(size = 5, alpha = 0.6) + 
+  stat_ellipse(alpha = 0.8) +
+  coord_fixed() + 
+  scale_color_viridis("", begin = 0, end = .9, discrete = T) +
+  labs(x = paste0("RDA 1 (", explained[1],"%)"),
+       y = paste0("RDA 2 (", explained[2],"%)")) + 
+  geom_segment(data = env.vecs, size = .5,
+               aes(x = 0, y = 0,
+                   xend = scale.vecs*RDA1, 
+                   yend = scale.vecs*RDA2), 
+               alpha = 1, color = "black",
+               arrow = arrow(angle = 20, 
+                             length = unit(.1, "inches"),
+                             type = "open")) +
+  geom_label_repel(alpha = 0.8, data = env.vecs, size = 3,
+                  aes(x = (scale.vecs-.2)*RDA1,
+                      y = (scale.vecs-.2)*RDA2,
+                      label = rownames(env.vecs)),
+                  color = "black", segment.alpha = 0) +
+  ggsave("figures/rda.png", width = 5, height = 5, units = "in", dpi = 500)
+
+envfit(rda.out, env_vars)
+
+```
+So we've confirmed our treatments worked and appear to be associated with the differences in composition. Also, pulse treatments appear to be driving composition based on nitrogen, sulfides, and salinity as well, with pulse treatments also showing significant effects of NH4, DRP, and soil surface temp that distinguish them from the pulse treatments. 
+
+## Taxonomic analyses
+```{r}
+tax.expand <- tax %>% separate(taxonomy, into = c("domain", "phylum", "class", "order", "family", "genus", "species"), ",")
+desulf.tax <- tax.expand %>% group_by(domain, phylum, class, order, family, genus, species) %>% 
+  filter(stringr::str_detect(order, "sulf")|stringr::str_detect(order, "Sulf"))
+unique(desulf.tax$OTU)
+
+desulf.cols <- which(colnames(otus) %in% paste0("otu",desulf.tax$OTU))
+otus.rel <- decostand(otus, method = "total")
+as.data.frame(rowSums(otus.rel[,desulf.cols])) %>% 
+  rownames_to_column(var = "sample_ID") %>% 
+  rename(sulf_percent = "rowSums(otus.rel[, desulf.cols])") %>% 
+  # gather(-sample_ID, key = otu, value = abundance) %>% 
+  left_join(design) %>% 
+  group_by(date, treatment, molecule) %>% 
+  ggplot(aes(x = treatment, y = sulf_percent)) +
+  #geom_jitter(alpha = 0.25, show.legend = F) +
+  geom_boxplot(alpha = 1) +
+  #scale_y_log10() +
+  labs(y = "Percent potential sulfate reducers", x = "") +
+  ggsave("figures/sulfate-reduction.png", width = 5, height = 3/4*5, units = "in", dpi = 500)
+
+sulf.data <- as.data.frame(rowSums(otus.rel[,desulf.cols])) %>% 
+  rownames_to_column(var = "sample_ID") %>% 
+  rename(sulf_percent = "rowSums(otus.rel[, desulf.cols])") %>% 
+  # gather(-sample_ID, key = otu, value = abundance) %>% 
+  left_join(design)
+summary(aov(sulf_percent ~ treatment, data = sulf.data))
+  
+methan.tax <- tax.expand %>% group_by(domain, phylum, class, order, family, genus, species) %>% 
+  filter(stringr::str_detect(family, "Meth") | stringr::str_detect(genus, "Meth"))
+unique(methan.tax$OTU)
+methan.cols <- which(colnames(otus) %in% paste0("otu",methan.tax$OTU))
+as.data.frame(rowSums(otus.rel[,methan.cols])) %>% 
+  rownames_to_column(var = "sample_ID") %>% 
+  rename(methan_percent = "rowSums(otus.rel[, methan.cols])") %>% 
+  # gather(-sample_ID, key = otu, value = abundance) %>% 
+  left_join(design) %>% 
+  group_by(date, treatment, molecule) %>% 
+  ggplot(aes(x = treatment, y = methan_percent)) +
+  #geom_jitter(alpha = 0.25, show.legend = F) +
+  geom_boxplot(alpha = 1) +
+  #scale_y_log10() +
+  labs(y = "Percent potential methanogens", x = "") + 
+  ggsave("figures/methanogens.png", width = 5, height = 5, units = "in", dpi = 500)
+
+methan.dat <- as.data.frame(rowSums(otus.rel[,methan.cols])) %>% 
+  rownames_to_column(var = "sample_ID") %>% 
+  rename(methan_percent = "rowSums(otus.rel[, methan.cols])") %>% 
+  # gather(-sample_ID, key = otu, value = abundance) %>% 
+  left_join(design)
+summary(aov(methan_percent ~ treatment, data = methan.dat))
+```
+From this analysis, it looks like press treatments significantly affect sulfate reducers, but less so methanogens. 

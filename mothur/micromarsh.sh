@@ -1,0 +1,9 @@
+#!/bin/bash
+#PBS -k o
+#PBS -l nodes=1:ppn=8,vmem=50gb,walltime=168:00:00
+#PBS -M wisnoski@indiana.edu
+#PBS -m abe
+#PBS -j oe
+cd /N/dc2/projects/Lennon_Sequences/micromarsh
+module load gcc/6.3.0
+/N/u/wisnoski/Carbonate/mothur/mothur /gpfs/home/w/i/wisnoski/Carbonate/GitHub/MicroMarsh/mothur/micromarsh.batch
