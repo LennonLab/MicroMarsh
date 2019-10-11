@@ -88,7 +88,7 @@ rownames(otus) <- rnames
 # update design object to reflect the samples
 design <- inner_join(tibble(sample_ID = rownames(otus)), design) %>% 
   filter(treatment %in% c("C", "F", "PU", "PR")) %>% 
-  filter(month(date, label = T) == "Oct") %>% 
+  filter(month(date, label = T) %in% c("Oct", "Jul")) %>% 
   filter(year(date) %in% c(2015, 2016)) # subset just to sequential fall samples
 
 # reorder the otu table to match design
