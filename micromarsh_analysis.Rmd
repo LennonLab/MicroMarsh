@@ -13,9 +13,11 @@ library(viridis)
 library(lubridate)
 library(pander)
 library(ggrepel)
+library(ggtext)
 
-theme_set(theme_bw() + 
+theme_set(theme_classic() + 
             theme(strip.background = element_blank(), panel.grid.minor = element_blank()))
+my.palette <- c("#29843F", "#255386", "#EE7925", "#97340F")
 ```
 
 ### Load and clean the data
@@ -104,11 +106,13 @@ otus.alpha <- exp(diversity(otus, "shannon"))
 data.frame(richness = otus.rich, diversity = otus.alpha) %>% rownames_to_column("sample_ID") %>% 
   left_join(design) %>% 
   group_by(date, treatment, molecule) %>%
-  ggplot(aes(x = treatment, y = diversity)) +
+  ggplot(aes(x = treatment, y = diversity, fill = treatment)) +
   # geom_point(alpha = 0.5) +
-  geom_boxplot(position = position_dodge(), alpha = .7) +
-  labs(x = "", y = expression(paste(alpha,"-diversity (species equivalents, D = 1)"))) +
-  ggsave("figures/alpha.png", width = 5, height = 3/4*5, units = "in", dpi = 500)
+  geom_boxplot(width = .7, position = position_dodge(), alpha = .8) +
+  labs(x = "", y = expression(paste(alpha,"-diversity ("^1,"D)"))) +
+  scale_fill_manual(values = my.palette) +
+  theme(legend.position = "none") +
+  ggsave("figures/alpha.png", width = 4, height = 3, units = "in", dpi = 500)
 
 alpha.by.treat <- data.frame(richness = otus.rich, diversity = otus.alpha) %>% rownames_to_column("sample_ID") %>% 
   left_join(design)
@@ -132,9 +136,9 @@ as.data.frame(scores(otus.pcoa)) %>%
   rownames_to_column("sample_ID") %>% 
   left_join(design) %>% 
   ggplot(aes(x = Dim1, y = Dim2, color = treatment)) + 
-  geom_point(size = 5, alpha = 0.6) + 
+  geom_point(size = 5, alpha = 0.7) + 
   coord_fixed() + 
-  scale_color_viridis("", begin = 0, end = .9, discrete = T) +
+  scale_color_manual(values = my.palette) +
   labs(x = paste0("PCoA 1 (", explained[1],"%)"),
        y = paste0("PCoA 2 (", explained[2],"%)")) + 
   stat_ellipse() +
@@ -153,35 +157,51 @@ We can take this a step further by constraining our ordination by environmental 
 ```{r}
 env_vars <- env %>% select(DRP, NH4, NO2_3, Sulfides, Salinity, Soil_surface_temp)
 
-rda.out <- rda(otus ~ ., data = env_vars)
+rda.out <- rda(otus.hel ~ ., data = as.data.frame(scale(env_vars)))
 
 env.vecs <- as.data.frame(rda.out$CCA$biplot[,c(1,2)])
-scale.vecs <- 100
+scale.vecs <- 1
 explained <- round(100*eigenvals(rda.out)[c(1,2)]/sum(eigenvals(rda.out)),1)
+
+env.vecs$labels <- c(
+  "DRP", 
+  "NH<sub>4</sub>", 
+  "NO<sub>2</sub><sup>3</sup>",
+  "Sulfides",
+  "Salinity",
+  "Soil surface temp"
+)
 as.data.frame(scores(rda.out)$sites) %>% 
   rownames_to_column("sample_ID") %>% 
   left_join(design) %>% 
   ggplot(aes(x = RDA1, y = RDA2, color = treatment)) + 
+  geom_hline(aes(yintercept = 0), alpha = 0.2) + 
+  geom_vline(aes(xintercept = 0), alpha = 0.2) +
   geom_point(size = 5, alpha = 0.6) + 
   stat_ellipse(alpha = 0.8) +
   coord_fixed() + 
-  scale_color_viridis("", begin = 0, end = .9, discrete = T) +
+  scale_color_manual("", values = my.palette) +
+  scale_x_continuous(limits = c(-.5, 1.3)) +
   labs(x = paste0("RDA 1 (", explained[1],"%)"),
        y = paste0("RDA 2 (", explained[2],"%)")) + 
   geom_segment(data = env.vecs, size = .5,
                aes(x = 0, y = 0,
                    xend = scale.vecs*RDA1, 
                    yend = scale.vecs*RDA2), 
-               alpha = 1, color = "black",
+               alpha = .7, color = "black",
                arrow = arrow(angle = 20, 
                              length = unit(.1, "inches"),
                              type = "open")) +
-  geom_label_repel(alpha = 0.8, data = env.vecs, size = 3,
-                  aes(x = (scale.vecs-.2)*RDA1,
-                      y = (scale.vecs-.2)*RDA2,
-                      label = rownames(env.vecs)),
-                  color = "black", segment.alpha = 0) +
-  ggsave("figures/rda.png", width = 5, height = 5, units = "in", dpi = 500)
+  geom_richtext(alpha = 0.8, data = env.vecs, size = 3,
+                  aes(x = (scale.vecs)*RDA1 + .05,
+                      y = (scale.vecs)*RDA2 + .05,
+                      label = env.vecs$labels),
+                  color = "black", 
+                #label.padding = grid::unit(rep(0,4), "pt"),
+                label.color = NA, fill = NA, 
+                nudge_y = c(-.05,-.01,0,0,0,-.13), 
+                nudge_x = c(0.05,0,0.05,0.08,0.08,0)) +
+  ggsave("figures/rda.png", width = 7, height = 5, units = "in", dpi = 500)
 
 envfit(rda.out, env_vars)
 
@@ -203,12 +223,14 @@ as.data.frame(rowSums(otus.rel[,desulf.cols])) %>%
   # gather(-sample_ID, key = otu, value = abundance) %>% 
   left_join(design) %>% 
   group_by(date, treatment, molecule) %>% 
-  ggplot(aes(x = treatment, y = sulf_percent)) +
+  ggplot(aes(x = treatment, y = sulf_percent*100, fill = treatment)) +
   #geom_jitter(alpha = 0.25, show.legend = F) +
-  geom_boxplot(alpha = 1) +
+  geom_boxplot(alpha = .8, width = .7) +
   #scale_y_log10() +
+  scale_fill_manual(values = my.palette) +
+  theme(legend.position = "none") +
   labs(y = "Percent potential sulfate reducers", x = "") +
-  ggsave("figures/sulfate-reduction.png", width = 5, height = 3/4*5, units = "in", dpi = 500)
+  ggsave("figures/sulfate-reduction.png", width = 4, height = 3, units = "in", dpi = 500)
 
 sulf.data <- as.data.frame(rowSums(otus.rel[,desulf.cols])) %>% 
   rownames_to_column(var = "sample_ID") %>% 
@@ -218,7 +240,8 @@ sulf.data <- as.data.frame(rowSums(otus.rel[,desulf.cols])) %>%
 summary(aov(sulf_percent ~ treatment, data = sulf.data))
   
 methan.tax <- tax.expand %>% group_by(domain, phylum, class, order, family, genus, species) %>% 
-  filter(stringr::str_detect(family, "Meth") | stringr::str_detect(genus, "Meth"))
+  filter(domain == "d:Archaea") %>% 
+  filter(stringr::str_detect(order, "Meth") | stringr::str_detect(genus, "Meth"))
 unique(methan.tax$OTU)
 methan.cols <- which(colnames(otus) %in% paste0("otu",methan.tax$OTU))
 as.data.frame(rowSums(otus.rel[,methan.cols])) %>% 
@@ -227,12 +250,14 @@ as.data.frame(rowSums(otus.rel[,methan.cols])) %>%
   # gather(-sample_ID, key = otu, value = abundance) %>% 
   left_join(design) %>% 
   group_by(date, treatment, molecule) %>% 
-  ggplot(aes(x = treatment, y = methan_percent)) +
+  ggplot(aes(x = treatment, y = methan_percent*100, fill = treatment)) +
   #geom_jitter(alpha = 0.25, show.legend = F) +
-  geom_boxplot(alpha = 1) +
+  geom_boxplot(alpha = .8, width = 0.7) +
+  scale_fill_manual(values = my.palette) +
+  theme(legend.position = "none") +
   #scale_y_log10() +
   labs(y = "Percent potential methanogens", x = "") + 
-  ggsave("figures/methanogens.png", width = 5, height = 5, units = "in", dpi = 500)
+  ggsave("figures/methanogens.png", width = 4, height = 3, units = "in", dpi = 500)
 
 methan.dat <- as.data.frame(rowSums(otus.rel[,methan.cols])) %>% 
   rownames_to_column(var = "sample_ID") %>% 
