@@ -1,9 +1,8 @@
 ---
-title: "Bacterial community responses to salinization"
-date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  pdf_document: default
+  html_document: default
 ---
-
-
 
 ## Setup
 ```{r setup, include=FALSE}
@@ -118,7 +117,7 @@ alpha.by.treat <- data.frame(richness = otus.rich, diversity = otus.alpha) %>% r
   left_join(design)
 alpha.mod <- aov(diversity ~ treatment, data = alpha.by.treat)
 summary(alpha.mod)
-plot(TukeyHSD(alpha.mod))
+(TukeyHSD(alpha.mod))
 ```
 
 Here we notice that the total community has consistently higher diversity overall. We also see that freshwater additions and pulse saltwater disturbances support lower alpha-diversity than the control, but press saltwater disturbances show a stronger reduction in diversity. ANOVA indicates there are significant differences between the treatments. Tukey's post hoc test suggests there are significant differences between press and freshwater treatments, and between press and control treatments. 
@@ -238,6 +237,7 @@ sulf.data <- as.data.frame(rowSums(otus.rel[,desulf.cols])) %>%
   # gather(-sample_ID, key = otu, value = abundance) %>% 
   left_join(design)
 summary(aov(sulf_percent ~ treatment, data = sulf.data))
+TukeyHSD(aov(sulf_percent ~ treatment, data = sulf.data))
   
 methan.tax <- tax.expand %>% group_by(domain, phylum, class, order, family, genus, species) %>% 
   filter(domain == "d:Archaea") %>% 
@@ -265,5 +265,6 @@ methan.dat <- as.data.frame(rowSums(otus.rel[,methan.cols])) %>%
   # gather(-sample_ID, key = otu, value = abundance) %>% 
   left_join(design)
 summary(aov(methan_percent ~ treatment, data = methan.dat))
+TukeyHSD(aov(methan_percent ~ treatment, data = methan.dat))
 ```
 From this analysis, it looks like press treatments significantly affect sulfate reducers, but less so methanogens. 
