@@ -13,6 +13,7 @@ library(lubridate)
 library(pander)
 library(ggrepel)
 library(ggtext)
+library(cowplot)
 
 theme_set(theme_classic() + 
             theme(strip.background = element_blank(), panel.grid.minor = element_blank()))
@@ -108,6 +109,7 @@ data.frame(richness = otus.rich, diversity = otus.alpha) %>% rownames_to_column(
   ggplot(aes(x = treatment, y = diversity, fill = treatment)) +
   # geom_point(alpha = 0.5) +
   geom_boxplot(width = .7, position = position_dodge(), alpha = .8) +
+  annotate("text", x = "Press", y = 1300, label = "*", size = 4) +
   labs(x = "", y = expression(paste(alpha,"-diversity ("^1,"D)"))) +
   scale_fill_manual(values = my.palette) +
   theme(legend.position = "none") +
@@ -164,8 +166,8 @@ explained <- round(100*eigenvals(rda.out)[c(1,2)]/sum(eigenvals(rda.out)),1)
 
 env.vecs$labels <- c(
   "DRP", 
-  "NH<sub>4</sub>", 
-  "NO<sub>2</sub><sup>3</sup>",
+  "NH<sub>4</sub><sup>+</sup>", 
+  "NO<sub>3</sub><sup>-</sup>",
   "Sulfides",
   "Salinity",
   "Soil surface temp"
@@ -216,7 +218,7 @@ unique(desulf.tax$OTU)
 
 desulf.cols <- which(colnames(otus) %in% paste0("otu",desulf.tax$OTU))
 otus.rel <- decostand(otus, method = "total")
-as.data.frame(rowSums(otus.rel[,desulf.cols])) %>% 
+sulf.plot <- as.data.frame(rowSums(otus.rel[,desulf.cols])) %>% 
   rownames_to_column(var = "sample_ID") %>% 
   rename(sulf_percent = "rowSums(otus.rel[, desulf.cols])") %>% 
   # gather(-sample_ID, key = otu, value = abundance) %>% 
@@ -226,6 +228,8 @@ as.data.frame(rowSums(otus.rel[,desulf.cols])) %>%
   #geom_jitter(alpha = 0.25, show.legend = F) +
   geom_boxplot(alpha = .8, width = .7) +
   #scale_y_log10() +
+  annotate("text", x = "Press", y = 5.8, label = "*", size = 4) +
+  annotate("text", x = "Pulse", y = 4.2, label = "*", size = 4) +
   scale_fill_manual(values = my.palette) +
   theme(legend.position = "none") +
   labs(y = "Percent potential sulfate reducers", x = "") +
@@ -244,7 +248,7 @@ methan.tax <- tax.expand %>% group_by(domain, phylum, class, order, family, genu
   filter(stringr::str_detect(order, "Meth") | stringr::str_detect(genus, "Meth"))
 unique(methan.tax$OTU)
 methan.cols <- which(colnames(otus) %in% paste0("otu",methan.tax$OTU))
-as.data.frame(rowSums(otus.rel[,methan.cols])) %>% 
+methan.plot <- as.data.frame(rowSums(otus.rel[,methan.cols])) %>% 
   rownames_to_column(var = "sample_ID") %>% 
   rename(methan_percent = "rowSums(otus.rel[, methan.cols])") %>% 
   # gather(-sample_ID, key = otu, value = abundance) %>% 
@@ -266,5 +270,9 @@ methan.dat <- as.data.frame(rowSums(otus.rel[,methan.cols])) %>%
   left_join(design)
 summary(aov(methan_percent ~ treatment, data = methan.dat))
 TukeyHSD(aov(methan_percent ~ treatment, data = methan.dat))
+
+plot_grid(sulf.plot, methan.plot, labels = "auto") +
+  ggsave("figures/funtional_response.png", width = 8, height = 3.2, units = "in", dpi = 500)
+
 ```
 From this analysis, it looks like press treatments significantly affect sulfate reducers, but less so methanogens. 
