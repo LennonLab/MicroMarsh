@@ -145,7 +145,8 @@ as.data.frame(scores(otus.pcoa)) %>%
   stat_ellipse() +
   ggsave("figures/ordination.png", width = 5, height = 5, units = "in", dpi = 500)
 
-
+library(RVAideMemoire)
+pairwise.perm <- pairwise.perm.manova(resp = vegdist(otus.hel, method = "euclidean"), fact = design$treatment, nperm = 9999, R2 = TRUE, F = TRUE)
 perma.otus <- adonis(otus.hel ~ treatment, method = "euclidean", data = design)
 pander(perma.otus$aov.tab)
 ```
@@ -159,11 +160,44 @@ We can take this a step further by constraining our ordination by environmental 
 env_vars <- env %>% select(DRP, NH4, NO2_3, Sulfides, Salinity, Soil_surface_temp)
 
 rda.out <- rda(otus.hel ~ ., data = as.data.frame(scale(env_vars)))
+# anova(rda.out)
+# output:
+# Model: rda(formula = otus.hel ~ DRP + NH4 + NO2_3 + Sulfides + Salinity + Soil_surface_temp, data = as.data.frame(scale(env_vars)))
+#          Df Variance      F Pr(>F)   
+# Model     6  0.18684 2.0298  0.004 **
+# Residual  8  0.12273                 
+# ---
+
+# anova(rda.out, by = "axis")
+# output:   Df Variance   F     Pr(>F)
+# RDA1      1 0.117692 7.6717  0.003 **
+# RDA2      1 0.024181 1.5762  0.492   
+# RDA3      1 0.012699 0.8278  1.000   
+# RDA4      1 0.011460 0.7470  1.000   
+# RDA5      1 0.010688 0.6967  0.980   
+# RDA6      1 0.010116 0.6594  0.835   
+# Residual  8 0.122729                
+
+# anova(rda.out, by = "terms")
+# output:
+#                   Df Variance      F Pr(>F)   
+# DRP                1 0.070641 4.6047  0.003 **
+# NH4                1 0.041443 2.7014  0.016 * 
+# NO2_3              1 0.013999 0.9125  0.416   
+# Sulfides           1 0.016840 1.0977  0.297   
+# Salinity           1 0.025217 1.6438  0.099 . 
+# Soil_surface_temp  1 0.018696 1.2187  0.256   
+# Residual           8 0.122729               
 
 env.vecs <- as.data.frame(rda.out$CCA$biplot[,c(1,2)])
 scale.vecs <- 1
 explained <- round(100*eigenvals(rda.out)[c(1,2)]/sum(eigenvals(rda.out)),1)
 
+fit <- envfit(rda.out, env_vars, permutations = 999, display = "lc")
+fit
+#plot(rda.out, type = "p")
+#plot(fit, col = "red")
+vif.cca(rda.out)
 env.vecs$labels <- c(
   "DRP", 
   "NH<sub>4</sub><sup>+</sup>", 
@@ -196,15 +230,13 @@ as.data.frame(scores(rda.out)$sites) %>%
   geom_richtext(alpha = 0.8, data = env.vecs, size = 3,
                   aes(x = (scale.vecs)*RDA1 + .05,
                       y = (scale.vecs)*RDA2 + .05,
-                      label = env.vecs$labels),
+                      label = labels),
                   color = "black", 
                 #label.padding = grid::unit(rep(0,4), "pt"),
                 label.color = NA, fill = NA, 
                 nudge_y = c(-.05,-.01,0,0,0,-.13), 
                 nudge_x = c(0.05,0,0.05,0.08,0.08,0)) +
   ggsave("figures/rda.png", width = 7, height = 5, units = "in", dpi = 500)
-
-envfit(rda.out, env_vars)
 
 ```
 So we've confirmed our treatments worked and appear to be associated with the differences in composition. Also, pulse treatments appear to be driving composition based on nitrogen, sulfides, and salinity as well, with pulse treatments also showing significant effects of NH4, DRP, and soil surface temp that distinguish them from the pulse treatments. 
@@ -232,7 +264,7 @@ sulf.plot <- as.data.frame(rowSums(otus.rel[,desulf.cols])) %>%
   annotate("text", x = "Pulse", y = 4.2, label = "*", size = 4) +
   scale_fill_manual(values = my.palette) +
   theme(legend.position = "none") +
-  labs(y = "Percent potential sulfate reducers", x = "") +
+  labs(y = "Potential sulfate reducers (%)", x = "") +
   ggsave("figures/sulfate-reduction.png", width = 4, height = 3, units = "in", dpi = 500)
 
 sulf.data <- as.data.frame(rowSums(otus.rel[,desulf.cols])) %>% 
@@ -260,7 +292,7 @@ methan.plot <- as.data.frame(rowSums(otus.rel[,methan.cols])) %>%
   scale_fill_manual(values = my.palette) +
   theme(legend.position = "none") +
   #scale_y_log10() +
-  labs(y = "Percent potential methanogens", x = "") + 
+  labs(y = "Potential methanogens (%)", x = "") + 
   ggsave("figures/methanogens.png", width = 4, height = 3, units = "in", dpi = 500)
 
 methan.dat <- as.data.frame(rowSums(otus.rel[,methan.cols])) %>% 
@@ -271,7 +303,7 @@ methan.dat <- as.data.frame(rowSums(otus.rel[,methan.cols])) %>%
 summary(aov(methan_percent ~ treatment, data = methan.dat))
 TukeyHSD(aov(methan_percent ~ treatment, data = methan.dat))
 
-plot_grid(sulf.plot, methan.plot, labels = "auto") +
+plot_grid(sulf.plot, methan.plot, labels = c("a.", "b."), label_fontface = "plain") +
   ggsave("figures/funtional_response.png", width = 8, height = 3.2, units = "in", dpi = 500)
 
 ```
