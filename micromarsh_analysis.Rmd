@@ -1,27 +1,32 @@
 ---
-title: "Bacterial community responses to salinization"
-date: '`r format(Sys.time(), "%d %B, %Y")`'
+title: "Differential effects of press versus pulse seawater intrusion on microbial communities of a tidal freshwater marsh"
+author: "C. Mobilian, N.I. Wisnoski, J.T. Lennon, M. Alber, S. Widney, C.B. Craft"
+date: "2020"
+output: pdf_document
 ---
 
+# Setup
+```{r setup, message = FALSE}
+library("tidyverse")
+library("vegan")
+library("viridis")
+library("lubridate")
+library("pander")
+library("ggrepel")
+library("ggtext")
+library("cowplot")
+library("RVAideMemoire")
 
-
-## Setup
-```{r setup, include=FALSE}
-library(tidyverse)
-library(vegan)
-library(viridis)
-library(lubridate)
-library(pander)
-library(ggrepel)
-
-theme_set(theme_bw() + 
-            theme(strip.background = element_blank(), panel.grid.minor = element_blank()))
+theme_set(theme_classic() + 
+            theme(strip.background = element_blank(), 
+                  panel.grid.minor = element_blank()))
+my.palette <- c("#29843F", "#255386", "#EE7925", "#97340F")
 ```
 
-### Load and clean the data
+## Load and clean the data
 
 
-```{r, include=FALSE, message=FALSE}
+```{r, message=FALSE}
 # read in experimental design and change classes and sample names
 design <- read_csv("data/design.csv",
    col_types = cols(
@@ -89,126 +94,190 @@ env$date <- as_date(paste0(env$Year,'-',env$Month,'-01'))
 colnames(env)[4:5] <- c("treatment", "replicate")
 env <- inner_join(design, env)
 
-levels(design$treatment) <- c("Control", "Control with sides", "Freshwater", "Pulse", "Press")
+levels(design$treatment) <- c("Control", "Control with sides", 
+                              "Freshwater", "Pulse", "Press")
 ```
-Here i focused just on the control, freshwater, pulse, press treatments in October 2016.
 
 # Results
 ## How does the diversity of a local community change under our different experimental treatments?
-
-For taxa to persist in a treatment, they must be able to grow locally or immigrate from elsewhere. Here, we compare an estimate of local (alpha) diversity for the total DNA community within each treatment. 
 ```{r, message=FALSE, fig.align='center', fig.height=5, fig.width=6}
 otus.rich <- rowSums(decostand(otus, method = "pa"))
 otus.alpha <- exp(diversity(otus, "shannon"))
 
-data.frame(richness = otus.rich, diversity = otus.alpha) %>% rownames_to_column("sample_ID") %>% 
+data.frame(richness = otus.rich, diversity = otus.alpha) %>% 
+  rownames_to_column("sample_ID") %>% 
   left_join(design) %>% 
   group_by(date, treatment, molecule) %>%
-  ggplot(aes(x = treatment, y = diversity)) +
+  ggplot(aes(x = treatment, y = diversity, fill = treatment)) +
   # geom_point(alpha = 0.5) +
-  geom_boxplot(position = position_dodge(), alpha = .7) +
-  labs(x = "", y = expression(paste(alpha,"-diversity (species equivalents, D = 1)"))) +
-  ggsave("figures/alpha.png", width = 5, height = 3/4*5, units = "in", dpi = 500)
+  geom_boxplot(width = .7, position = position_dodge(), alpha = .8) +
+  annotate("text", x = "Press", y = 1300, label = "*", size = 4) +
+  labs(x = "", y = expression(paste(alpha,"-diversity ("^1,"D)"))) +
+  scale_fill_manual(values = my.palette) +
+  theme(legend.position = "none") +
+  ggsave("figures/Fig1.png", width = 4, height = 3, units = "in", dpi = 500) +
+  ggsave("figures/Fig1.pdf", width = 4, height = 3, units = "in")
 
-alpha.by.treat <- data.frame(richness = otus.rich, diversity = otus.alpha) %>% rownames_to_column("sample_ID") %>% 
+alpha.by.treat <- data.frame(richness = otus.rich, diversity = otus.alpha) %>% 
+  rownames_to_column("sample_ID") %>% 
   left_join(design)
 alpha.mod <- aov(diversity ~ treatment, data = alpha.by.treat)
 summary(alpha.mod)
-plot(TukeyHSD(alpha.mod))
+(TukeyHSD(alpha.mod))
 ```
-
-Here we notice that the total community has consistently higher diversity overall. We also see that freshwater additions and pulse saltwater disturbances support lower alpha-diversity than the control, but press saltwater disturbances show a stronger reduction in diversity. ANOVA indicates there are significant differences between the treatments. Tukey's post hoc test suggests there are significant differences between press and freshwater treatments, and between press and control treatments. 
 
 ## How does saltwater addition change community structure?
 
-Here, we want to know about the diversity among sites (beta diversity). 
 ```{r, message=FALSE, fig.align='center', fig.height=5, fig.width=6}
 otus.hel <- decostand(otus, method = "hellinger")
 otus.dist <- vegdist(otus.hel, method = "euclidean")
 otus.pcoa <- cmdscale(otus.dist, eig = T)
+
 # explained variance
 explained <- round(100*eigenvals(otus.pcoa)[c(1,2)]/sum(eigenvals(otus.pcoa)),1)
 as.data.frame(scores(otus.pcoa)) %>% 
   rownames_to_column("sample_ID") %>% 
   left_join(design) %>% 
   ggplot(aes(x = Dim1, y = Dim2, color = treatment)) + 
-  geom_point(size = 5, alpha = 0.6) + 
+  geom_point(size = 5, alpha = 0.7) + 
   coord_fixed() + 
-  scale_color_viridis("", begin = 0, end = .9, discrete = T) +
+  scale_color_manual(values = my.palette) +
   labs(x = paste0("PCoA 1 (", explained[1],"%)"),
        y = paste0("PCoA 2 (", explained[2],"%)")) + 
   stat_ellipse() +
   ggsave("figures/ordination.png", width = 5, height = 5, units = "in", dpi = 500)
 
-
+# PERMANOVA
 perma.otus <- adonis(otus.hel ~ treatment, method = "euclidean", data = design)
 pander(perma.otus$aov.tab)
+pairwise.perm <- pairwise.perm.manova(resp = vegdist(otus.hel, method = "euclidean"), 
+                                      fact = design$treatment, nperm = 9999, 
+                                      R2 = TRUE, F = TRUE)
+pairwise.perm$p.value
+pairwise.perm$F.value
+pairwise.perm$R2.value
 ```
 
-From this analysis, it seems that there is a gradient from freshwater, to pulse, to press treatments, with press treatments having the strongest effect on community structure. A PERMANOVA shows that treatment is a significant predictor of differences in community structure, explaining approx. 54% of the differences.
+## Quantitative predictors with Redundancy Analysis
 
-## Redundancy Analysis
-We can take this a step further by constraining our ordination by environmental variables to see which variables in particular are associated with differences in community structure. We'll perform a Redundancy Analysis (RDA).
-
-```{r}
+```{r, fig.align='center', fig.height=5, fig.width=6}
 env_vars <- env %>% select(DRP, NH4, NO2_3, Sulfides, Salinity, Soil_surface_temp)
 
-rda.out <- rda(otus ~ ., data = env_vars)
+rda.out <- rda(otus.hel ~ ., data = as.data.frame(scale(env_vars)))
+# anova(rda.out)
+# output:
+# Model: rda(formula = otus.hel ~ DRP + NH4 + NO2_3 + 
+#       Sulfides + Salinity + Soil_surface_temp, data = as.data.frame(scale(env_vars)))
+#          Df Variance      F Pr(>F)   
+# Model     6  0.18684 2.0298  0.004 **
+# Residual  8  0.12273                 
+# ---
+
+# anova(rda.out, by = "axis")
+# output:   Df Variance   F     Pr(>F)
+# RDA1      1 0.117692 7.6717  0.003 **
+# RDA2      1 0.024181 1.5762  0.492   
+# RDA3      1 0.012699 0.8278  1.000   
+# RDA4      1 0.011460 0.7470  1.000   
+# RDA5      1 0.010688 0.6967  0.980   
+# RDA6      1 0.010116 0.6594  0.835   
+# Residual  8 0.122729                
+
+# anova(rda.out, by = "terms")
+# output:
+#                   Df Variance      F Pr(>F)   
+# DRP                1 0.070641 4.6047  0.003 **
+# NH4                1 0.041443 2.7014  0.016 * 
+# NO2_3              1 0.013999 0.9125  0.416   
+# Sulfides           1 0.016840 1.0977  0.297   
+# Salinity           1 0.025217 1.6438  0.099 . 
+# Soil_surface_temp  1 0.018696 1.2187  0.256   
+# Residual           8 0.122729               
 
 env.vecs <- as.data.frame(rda.out$CCA$biplot[,c(1,2)])
-scale.vecs <- 100
+scale.vecs <- 1
 explained <- round(100*eigenvals(rda.out)[c(1,2)]/sum(eigenvals(rda.out)),1)
+
+# create vector labels
+env.vecs$labels <- c(
+  "DRP", 
+  "NH<sub>4</sub><sup>+</sup>", 
+  "NO<sub>3</sub><sup>-</sup>",
+  "Sulfides",
+  "Salinity",
+  "Soil surface temp"
+)
+
+# plot constrained ordination
 as.data.frame(scores(rda.out)$sites) %>% 
   rownames_to_column("sample_ID") %>% 
   left_join(design) %>% 
   ggplot(aes(x = RDA1, y = RDA2, color = treatment)) + 
+  geom_hline(aes(yintercept = 0), alpha = 0.2) + 
+  geom_vline(aes(xintercept = 0), alpha = 0.2) +
   geom_point(size = 5, alpha = 0.6) + 
   stat_ellipse(alpha = 0.8) +
   coord_fixed() + 
-  scale_color_viridis("", begin = 0, end = .9, discrete = T) +
+  scale_color_manual("", values = my.palette) +
+  scale_x_continuous(limits = c(-.5, 1.3)) +
   labs(x = paste0("RDA 1 (", explained[1],"%)"),
        y = paste0("RDA 2 (", explained[2],"%)")) + 
   geom_segment(data = env.vecs, size = .5,
                aes(x = 0, y = 0,
                    xend = scale.vecs*RDA1, 
                    yend = scale.vecs*RDA2), 
-               alpha = 1, color = "black",
+               alpha = .7, color = "black",
                arrow = arrow(angle = 20, 
                              length = unit(.1, "inches"),
                              type = "open")) +
-  geom_label_repel(alpha = 0.8, data = env.vecs, size = 3,
-                  aes(x = (scale.vecs-.2)*RDA1,
-                      y = (scale.vecs-.2)*RDA2,
-                      label = rownames(env.vecs)),
-                  color = "black", segment.alpha = 0) +
-  ggsave("figures/rda.png", width = 5, height = 5, units = "in", dpi = 500)
-
-envfit(rda.out, env_vars)
+  geom_richtext(alpha = 0.8, data = env.vecs, size = 3,
+                  aes(x = (scale.vecs)*RDA1 + .05,
+                      y = (scale.vecs)*RDA2 + .05,
+                      label = labels),
+                  color = "black", 
+                #label.padding = grid::unit(rep(0,4), "pt"),
+                label.color = NA, fill = NA, 
+                nudge_y = c(-.05,-.01,0,0,0,-.13), 
+                nudge_x = c(0.05,0,0.05,0.08,0.08,0)) +
+  ggsave("figures/Fig2.png", width = 7, height = 5, units = "in", dpi = 500) +
+  ggsave("figures/Fig2.pdf", width = 7, height = 5, units = "in")
 
 ```
-So we've confirmed our treatments worked and appear to be associated with the differences in composition. Also, pulse treatments appear to be driving composition based on nitrogen, sulfides, and salinity as well, with pulse treatments also showing significant effects of NH4, DRP, and soil surface temp that distinguish them from the pulse treatments. 
 
 ## Taxonomic analyses
-```{r}
-tax.expand <- tax %>% separate(taxonomy, into = c("domain", "phylum", "class", "order", "family", "genus", "species"), ",")
-desulf.tax <- tax.expand %>% group_by(domain, phylum, class, order, family, genus, species) %>% 
-  filter(stringr::str_detect(order, "sulf")|stringr::str_detect(order, "Sulf"))
-unique(desulf.tax$OTU)
+```{r, fig.align='center', fig.height=5, fig.width=6}
+tax.expand <- tax %>% separate(taxonomy, into = c("domain", "phylum", 
+                                                  "class", "order", 
+                                                  "family", "genus", 
+                                                  "species"), ",")
 
+# separate putative sulfate reducers
+desulf.tax <- tax.expand %>% 
+  group_by(domain, phylum, class, order, family, genus, species) %>% 
+  filter(stringr::str_detect(order, "sulf")|stringr::str_detect(order, "Sulf"))
+#unique(desulf.tax$OTU)
 desulf.cols <- which(colnames(otus) %in% paste0("otu",desulf.tax$OTU))
 otus.rel <- decostand(otus, method = "total")
-as.data.frame(rowSums(otus.rel[,desulf.cols])) %>% 
+
+# plot
+sulf.plot <- as.data.frame(rowSums(otus.rel[,desulf.cols])) %>% 
   rownames_to_column(var = "sample_ID") %>% 
   rename(sulf_percent = "rowSums(otus.rel[, desulf.cols])") %>% 
   # gather(-sample_ID, key = otu, value = abundance) %>% 
   left_join(design) %>% 
   group_by(date, treatment, molecule) %>% 
-  ggplot(aes(x = treatment, y = sulf_percent)) +
+  ggplot(aes(x = treatment, y = sulf_percent*100, fill = treatment)) +
   #geom_jitter(alpha = 0.25, show.legend = F) +
-  geom_boxplot(alpha = 1) +
+  geom_boxplot(alpha = .8, width = .7) +
   #scale_y_log10() +
-  labs(y = "Percent potential sulfate reducers", x = "") +
-  ggsave("figures/sulfate-reduction.png", width = 5, height = 3/4*5, units = "in", dpi = 500)
+  annotate("text", x = "Press", y = 5.8, label = "*", size = 4) +
+  annotate("text", x = "Pulse", y = 4.2, label = "*", size = 4) +
+  scale_fill_manual(values = my.palette) +
+  theme(legend.position = "none") +
+  labs(y = "Potential sulfate reducers (%)", x = "") +
+  ggsave("figures/Fig3a.png", width = 4, height = 3, units = "in", dpi = 500) +
+  ggsave("figures/Fig3a.pdf", width = 4, height = 3, units = "in")
+sulf.plot
 
 sulf.data <- as.data.frame(rowSums(otus.rel[,desulf.cols])) %>% 
   rownames_to_column(var = "sample_ID") %>% 
@@ -216,23 +285,31 @@ sulf.data <- as.data.frame(rowSums(otus.rel[,desulf.cols])) %>%
   # gather(-sample_ID, key = otu, value = abundance) %>% 
   left_join(design)
 summary(aov(sulf_percent ~ treatment, data = sulf.data))
+TukeyHSD(aov(sulf_percent ~ treatment, data = sulf.data))
   
-methan.tax <- tax.expand %>% group_by(domain, phylum, class, order, family, genus, species) %>% 
-  filter(stringr::str_detect(family, "Meth") | stringr::str_detect(genus, "Meth"))
-unique(methan.tax$OTU)
+# separate putative methanogens
+methan.tax <- tax.expand %>% 
+  group_by(domain, phylum, class, order, family, genus, species) %>% 
+  filter(domain == "d:Archaea") %>% 
+  filter(stringr::str_detect(order, "Meth") | stringr::str_detect(genus, "Meth"))
+#unique(methan.tax$OTU)
 methan.cols <- which(colnames(otus) %in% paste0("otu",methan.tax$OTU))
-as.data.frame(rowSums(otus.rel[,methan.cols])) %>% 
+methan.plot <- as.data.frame(rowSums(otus.rel[,methan.cols])) %>% 
   rownames_to_column(var = "sample_ID") %>% 
   rename(methan_percent = "rowSums(otus.rel[, methan.cols])") %>% 
   # gather(-sample_ID, key = otu, value = abundance) %>% 
   left_join(design) %>% 
   group_by(date, treatment, molecule) %>% 
-  ggplot(aes(x = treatment, y = methan_percent)) +
+  ggplot(aes(x = treatment, y = methan_percent*100, fill = treatment)) +
   #geom_jitter(alpha = 0.25, show.legend = F) +
-  geom_boxplot(alpha = 1) +
+  geom_boxplot(alpha = .8, width = 0.7) +
+  scale_fill_manual(values = my.palette) +
+  theme(legend.position = "none") +
   #scale_y_log10() +
-  labs(y = "Percent potential methanogens", x = "") + 
-  ggsave("figures/methanogens.png", width = 5, height = 5, units = "in", dpi = 500)
+  labs(y = "Potential methanogens (%)", x = "") + 
+  ggsave("figures/Fig3b.png", width = 4, height = 3, units = "in", dpi = 500) +
+  ggsave("figures/Fig3b.pdf", width = 4, height = 3, units = "in")
+methan.plot 
 
 methan.dat <- as.data.frame(rowSums(otus.rel[,methan.cols])) %>% 
   rownames_to_column(var = "sample_ID") %>% 
@@ -240,5 +317,10 @@ methan.dat <- as.data.frame(rowSums(otus.rel[,methan.cols])) %>%
   # gather(-sample_ID, key = otu, value = abundance) %>% 
   left_join(design)
 summary(aov(methan_percent ~ treatment, data = methan.dat))
+TukeyHSD(aov(methan_percent ~ treatment, data = methan.dat))
+
+# plot combined
+plot_grid(sulf.plot, methan.plot, labels = c("a.", "b."), label_fontface = "plain") +
+  ggsave("figures/Fig3.png", width = 8, height = 3.2, units = "in", dpi = 500) +
+  ggsave("figures/Fig3.pdf", width = 8, height = 3.2, units = "in")
 ```
-From this analysis, it looks like press treatments significantly affect sulfate reducers, but less so methanogens. 
